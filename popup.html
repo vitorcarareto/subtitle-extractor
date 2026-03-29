@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --bg: #1a1a1e;
+        --bg-raised: #242428;
+        --bg-inset: #141416;
+        --border: #2e2e34;
+        --text: #e0ddd8;
+        --text-dim: #7a7874;
+        --text-muted: #8a8680;
+        --accent: #e8a830;
+        --accent-dim: rgba(232, 168, 48, 0.12);
+        --accent-glow: rgba(232, 168, 48, 0.25);
+        --green: #4caf7c;
+        --green-dim: rgba(76, 175, 124, 0.12);
+        --green-glow: rgba(76, 175, 124, 0.3);
+        --red: #e05252;
+        --red-dim: rgba(224, 82, 82, 0.12);
+        --yellow: #d4a72c;
+        --yellow-dim: rgba(212, 167, 44, 0.12);
+        --blue: #5b9bd5;
+        --blue-dim: rgba(91, 155, 213, 0.12);
+        --radius: 6px;
+        --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+        --font-mono: 'DM Mono', 'SF Mono', 'Fira Code', monospace;
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      body {
+        width: 360px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font-body);
+        font-size: 13px;
+        padding: 0;
+        overflow: hidden;
+      }
+
+      /* ── Header ── */
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 16px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .header-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .logo {
+        width: 20px;
+        height: 20px;
+        border-radius: 4px;
+        background: linear-gradient(135deg, var(--accent), #c4881e);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--bg);
+        flex-shrink: 0;
+      }
+      .header h1 {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        color: var(--text);
+      }
+      .refresh-btn {
+        width: 28px;
+        height: 28px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: transparent;
+        color: var(--text-dim);
+        font-size: 14px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.15s;
+      }
+      .refresh-btn:hover {
+        background: var(--bg-raised);
+        color: var(--text);
+        border-color: var(--text-muted);
+      }
+
+      /* ── Content ── */
+      .content { padding: 14px 16px 16px; }
+
+      /* ── Status ── */
+      .status-bar {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 10px 12px;
+        border-radius: var(--radius);
+        font-size: 12px;
+        line-height: 1.45;
+        margin-bottom: 14px;
+        border: 1px solid transparent;
+        transition: all 0.25s;
+      }
+      .status-icon {
+        flex-shrink: 0;
+        width: 16px;
+        height: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-top: 1px;
+      }
+      .status-bar.info {
+        background: var(--blue-dim);
+        border-color: rgba(91, 155, 213, 0.15);
+        color: var(--blue);
+      }
+      .status-bar.success {
+        background: var(--green-dim);
+        border-color: rgba(76, 175, 124, 0.2);
+        color: var(--green);
+      }
+      .status-bar.error {
+        background: var(--red-dim);
+        border-color: rgba(224, 82, 82, 0.15);
+        color: var(--red);
+      }
+      .status-bar.warning {
+        background: var(--yellow-dim);
+        border-color: rgba(212, 167, 44, 0.15);
+        color: var(--yellow);
+      }
+
+      /* ── Saved confirmation overlay ── */
+      .saved-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(26, 26, 30, 0.92);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.3s;
+      }
+      .saved-overlay.visible {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .saved-check {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        background: var(--green-dim);
+        border: 2px solid var(--green);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 14px;
+        box-shadow: 0 0 24px var(--green-glow);
+        animation: none;
+      }
+      .saved-overlay.visible .saved-check {
+        animation: pop-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+      }
+      @keyframes pop-in {
+        0% { transform: scale(0.5); opacity: 0; }
+        100% { transform: scale(1); opacity: 1; }
+      }
+      .saved-check svg { width: 26px; height: 26px; color: var(--green); }
+      .saved-check svg path {
+        stroke-dasharray: 30;
+        stroke-dashoffset: 30;
+      }
+      .saved-overlay.visible .saved-check svg path {
+        animation: draw-check 0.4s 0.2s ease forwards;
+      }
+      @keyframes draw-check {
+        to { stroke-dashoffset: 0; }
+      }
+      .saved-label {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--text);
+        margin-bottom: 4px;
+      }
+      .saved-detail {
+        font-size: 11px;
+        color: var(--text-dim);
+        font-family: var(--font-mono);
+        padding: 0 24px;
+        text-align: center;
+        word-break: break-word;
+      }
+
+      /* ── Meta ── */
+      .meta-section {
+        display: none;
+        margin-bottom: 14px;
+      }
+      .meta-label {
+        font-size: 10px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted);
+        margin-bottom: 3px;
+      }
+      .meta-value {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text);
+        word-break: break-word;
+        line-height: 1.35;
+      }
+
+      /* ── Controls row ── */
+      .controls-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+      .control-group {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .control-label {
+        font-size: 10px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted);
+        white-space: nowrap;
+      }
+      .control-input {
+        width: 46px;
+        padding: 5px 4px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg-inset);
+        color: var(--text);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        text-align: center;
+        outline: none;
+        transition: border-color 0.15s;
+        -moz-appearance: textfield;
+      }
+      .control-input::-webkit-outer-spin-button,
+      .control-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      .control-input:focus {
+        border-color: var(--accent);
+      }
+      .control-select {
+        padding: 5px 6px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg-inset);
+        color: var(--text);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        outline: none;
+        transition: border-color 0.15s;
+        cursor: pointer;
+        -webkit-appearance: none;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%237a7874' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 6px center;
+        padding-right: 22px;
+      }
+      .control-select:focus {
+        border-color: var(--accent);
+      }
+      .control-select option {
+        background: var(--bg-raised);
+        color: var(--text);
+      }
+
+      /* ── Progress ── */
+      .progress-section {
+        margin-bottom: 14px;
+        display: none;
+      }
+      .progress-section.visible { display: block; }
+      .progress-track {
+        width: 100%;
+        height: 4px;
+        background: var(--bg-inset);
+        border-radius: 2px;
+        overflow: hidden;
+        position: relative;
+      }
+      .progress-fill {
+        height: 100%;
+        background: var(--accent);
+        border-radius: 2px;
+        width: 0%;
+        transition: width 0.2s ease-out;
+        position: relative;
+      }
+      .progress-fill.active::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          rgba(255, 255, 255, 0.2),
+          transparent
+        );
+        animation: shimmer 1.2s infinite;
+      }
+      @keyframes shimmer {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(200%); }
+      }
+      .progress-fill.done {
+        background: var(--green);
+      }
+      .progress-fill.done::after { display: none; }
+      .progress-label {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--text-dim);
+        margin-top: 6px;
+        text-align: right;
+      }
+
+      /* ── Button ── */
+      .action-btn {
+        width: 100%;
+        padding: 11px 16px;
+        border: none;
+        border-radius: var(--radius);
+        background: var(--accent);
+        color: var(--bg);
+        font-family: var(--font-body);
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        cursor: pointer;
+        transition: all 0.15s;
+        position: relative;
+        overflow: hidden;
+      }
+      .action-btn:hover:not(:disabled) {
+        background: #d49520;
+        box-shadow: 0 0 16px var(--accent-glow);
+      }
+      .action-btn:active:not(:disabled) {
+        transform: scale(0.985);
+      }
+      .action-btn:disabled {
+        background: var(--bg-raised);
+        color: var(--text-muted);
+        cursor: not-allowed;
+        box-shadow: none;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Success overlay -->
+    <div class="saved-overlay" id="savedOverlay">
+      <div class="saved-check">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 13l4 4L19 7" />
+        </svg>
+      </div>
+      <div class="saved-label" id="savedLabel">Saved!</div>
+      <div class="saved-detail" id="savedDetail"></div>
+    </div>
+
+    <div class="header">
+      <div class="header-left">
+        <div class="logo">S</div>
+        <h1>Subtitle Extractor</h1>
+      </div>
+      <button class="refresh-btn" id="refreshBtn" title="Re-check page">&#x21bb;</button>
+    </div>
+
+    <div class="content">
+      <div class="status-bar info" id="statusBox">
+        <div class="status-icon" id="statusIcon">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="5" r="0.8"/><rect x="7.2" y="7" width="1.6" height="4" rx="0.8"/></svg>
+        </div>
+        <span id="statusText">Checking page...</span>
+      </div>
+
+      <div class="meta-section" id="metaSection">
+        <div class="meta-label">Video</div>
+        <div class="meta-value" id="videoTitle">&mdash;</div>
+      </div>
+
+      <div class="controls-row" id="langRow" style="display: none;">
+        <div class="control-group" style="flex: 1;">
+          <span class="control-label">Language</span>
+          <select class="control-select" id="langSelect" style="width: 100%;"></select>
+        </div>
+      </div>
+
+      <div class="controls-row">
+        <div class="control-group" style="flex: 1;">
+          <span class="control-label">Prefix</span>
+          <input class="control-input" id="prefixInput" type="text" placeholder="optional" style="width: 100%; text-align: left;" />
+        </div>
+        <div class="control-group">
+          <span class="control-label">Format</span>
+          <select class="control-select" id="formatSelect">
+            <option value="txt">.txt</option>
+            <option value="srt">.srt</option>
+            <option value="vtt">.vtt</option>
+          </select>
+        </div>
+        <div class="control-group" id="parallelGroup">
+          <span class="control-label">Parallel</span>
+          <input class="control-input" id="concurrencyInput" type="number" min="1" max="20" value="10" />
+        </div>
+      </div>
+
+      <div class="progress-section" id="progressSection">
+        <div class="progress-track">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div class="progress-label" id="segmentCount"></div>
+      </div>
+
+      <button class="action-btn" id="downloadBtn" disabled>Download Subtitles</button>
+    </div>
+
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>

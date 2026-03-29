@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "Subtitle Extractor",
+  "version": "1.0",
+  "description": "Extract subtitles from video platforms",
+  "permissions": [
+    "webRequest",
+    "webNavigation",
+    "declarativeNetRequest",
+    "storage",
+    "activeTab",
+    "downloads"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "hotmart_headers",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
+  "host_permissions": [
+    "*://vod-akm.play.hotmart.com/*",
+    "*://*.hotmart.com/*",
+    "*://*.youtube.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.hotmart.com/*",
+        "*://*.youtube.com/*"
+      ],
+      "all_frames": true,
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Hotmart Subtitle Extractor"
+  },
+  "icons": {}
+}
