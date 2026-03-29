@@ -2,16 +2,20 @@
   "name": "hotmart-subtitle-extractor",
   "version": "1.0.0",
   "description": "",
-  "main": "background.js",
   "scripts": {
+    "build": "vite build && vite build -c vite.config.content.ts",
+    "dev": "vite build --watch",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "devDependencies": {
+    "@types/chrome": "^0.1.38",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.3",
     "vitest": "^4.1.2"
   }
 }
