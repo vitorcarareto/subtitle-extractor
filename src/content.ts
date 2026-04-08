@@ -1,35 +1,46 @@
+import { parseWebVTT, deduplicateCues, cuesToSrt, cuesToVtt } from './lib.js';
+import type { VideoMetadata, CaptionTrack, HotmartNextData, YouTubePlayerResponse } from './types.js';
+
+declare function showSaveFilePicker(options?: {
+  suggestedName?: string;
+  types?: Array<{
+    description: string;
+    accept: Record<string, string[]>;
+  }>;
+}): Promise<FileSystemFileHandle>;
+
 // Extract video metadata from supported video platforms
 (function () {
   const hostname = location.hostname;
 
-  function isHotmart() {
+  function isHotmart(): boolean {
     return hostname.includes('hotmart.com');
   }
 
-  function isYoutube() {
+  function isYoutube(): boolean {
     return hostname.includes('youtube.com');
   }
 
-  function extractMetadata() {
+  function extractMetadata(): VideoMetadata {
     if (isHotmart()) return extractHotmartMetadata();
     if (isYoutube()) return extractYoutubeMetadata();
     return { mediaCode: null, mediaTitle: null, videoName: null, videoIndex: null };
   }
 
-  function extractYoutubeMetadata() {
+  function extractYoutubeMetadata(): VideoMetadata {
     const videoName = document.querySelector('h1.ytd-watch-metadata yt-formatted-string')?.textContent?.trim()
-      || document.querySelector('meta[name="title"]')?.content
+      || document.querySelector('meta[name="title"]')?.getAttribute('content')
       || document.title.replace(/ - YouTube$/, '').trim()
       || null;
 
     // Extract caption tracks from ytInitialPlayerResponse
-    let captionTracks = null;
+    let captionTracks: CaptionTrack[] | null = null;
     try {
       // Try the global variable first (available on initial page load)
-      const playerResp = window.ytInitialPlayerResponse;
+      const playerResp = (window as unknown as { ytInitialPlayerResponse?: YouTubePlayerResponse }).ytInitialPlayerResponse;
       const tracks = playerResp?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
       if (tracks && tracks.length > 0) {
-        captionTracks = tracks.map(t => ({
+        captionTracks = tracks.map((t: { baseUrl: string; languageCode: string; name?: { simpleText?: string }; kind?: string }) => ({
           baseUrl: t.baseUrl,
           languageCode: t.languageCode,
           name: t.name?.simpleText || t.languageCode,
@@ -46,11 +57,11 @@
         const scripts = document.querySelectorAll('script');
         for (const script of scripts) {
           const text = script.textContent;
-          if (text.includes('"captionTracks"')) {
+          if (text && text.includes('"captionTracks"')) {
             const match = text.match(/"captionTracks":(\[.*?\])/);
             if (match) {
               const tracks = JSON.parse(match[1]);
-              captionTracks = tracks.map(t => ({
+              captionTracks = tracks.map((t: { baseUrl: string; languageCode: string; name?: { simpleText?: string }; kind?: string }) => ({
                 baseUrl: t.baseUrl,
                 languageCode: t.languageCode,
                 name: t.name?.simpleText || t.languageCode,
@@ -68,21 +79,21 @@
     return { mediaCode: null, mediaTitle: videoName, videoName, videoIndex: null, captionTracks };
   }
 
-  function extractHotmartMetadata() {
-    let mediaCode = null;
-    let mediaTitle = null;
+  function extractHotmartMetadata(): VideoMetadata {
+    let mediaCode: string | null = null;
+    let mediaTitle: string | null = null;
 
     const nextDataEl = document.getElementById('__NEXT_DATA__');
     if (nextDataEl) {
       try {
-        const data = JSON.parse(nextDataEl.textContent);
+        const data = JSON.parse(nextDataEl.textContent!) as HotmartNextData;
         const props = data?.props?.pageProps;
         if (props) {
           mediaCode = props.mediaCode || props.applicationData?.mediaCode || null;
           mediaTitle = props.mediaTitle || props.applicationData?.mediaTitle || null;
         }
         if (!mediaCode) {
-          const jsonStr = nextDataEl.textContent;
+          const jsonStr = nextDataEl.textContent!;
           const codeMatch = jsonStr.match(/"mediaCode"\s*:\s*"([^"]+)"/);
           const titleMatch = jsonStr.match(/"mediaTitle"\s*:\s*"([^"]+)"/);
           if (codeMatch) mediaCode = codeMatch[1];
@@ -97,7 +108,7 @@
       const scripts = document.querySelectorAll('script');
       for (const script of scripts) {
         const text = script.textContent;
-        if (text.includes('mediaCode')) {
+        if (text && text.includes('mediaCode')) {
           const codeMatch = text.match(/"mediaCode"\s*:\s*"([^"]+)"/);
           const titleMatch = text.match(/"mediaTitle"\s*:\s*"([^"]+)"/);
           if (codeMatch) mediaCode = codeMatch[1];
@@ -111,9 +122,9 @@
       mediaTitle = document.title.replace(/\s*[-|].*$/, '').trim() || null;
     }
 
-    let videoName = null;
-    let videoIndex = null;
-    let sectionIndex = null;
+    let videoName: string | null = null;
+    let videoIndex: number | null = null;
+    let sectionIndex: number | null = null;
     const section = document.querySelector('section[id^="sectionId_"]');
     if (section) {
       // Extract section number from the button's numbered circle div
@@ -125,7 +136,7 @@
       if (activeDiv) {
         const span = activeDiv.querySelector('span[title]');
         if (span) {
-          videoName = span.getAttribute('title') || span.textContent.trim();
+          videoName = span.getAttribute('title') || span.textContent!.trim();
         }
         const allItems = section.querySelectorAll('div[data-active]');
         for (let i = 0; i < allItems.length; i++) {
@@ -140,7 +151,7 @@
     return { mediaCode, mediaTitle, videoName, videoIndex, sectionIndex };
   }
 
-  function sendMetadata() {
+  function sendMetadata(): void {
     const metadata = extractMetadata();
     if (metadata.mediaCode || metadata.mediaTitle) {
       chrome.runtime.sendMessage({
@@ -160,9 +171,9 @@
   // ---------------------------------------------------------------------------
   // Overlay download button
   // ---------------------------------------------------------------------------
-  const OVERLAY_ID = 'subtitle-ext-overlay';
+  const OVERLAY_ID: string = 'subtitle-ext-overlay';
 
-  function injectOverlayStyles() {
+  function injectOverlayStyles(): void {
     if (document.getElementById('subtitle-ext-styles')) return;
     const style = document.createElement('style');
     style.id = 'subtitle-ext-styles';
@@ -313,14 +324,14 @@
     document.head.appendChild(style);
   }
 
-  const SVG_DOWNLOAD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
-  const SVG_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><path d="M5 13l4 4L19 7"/></svg>';
-  const SVG_ERROR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+  const SVG_DOWNLOAD: string = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+  const SVG_CHECK: string = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><path d="M5 13l4 4L19 7"/></svg>';
+  const SVG_ERROR: string = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
 
   // Circular progress ring SVG (fits within 32x32 button)
   // Circle: r=14, C=2*pi*14 ~= 87.96, rounded to 88
-  const RING_CIRCUMFERENCE = 88;
-  function buildProgressRingSVG() {
+  const RING_CIRCUMFERENCE: number = 88;
+  function buildProgressRingSVG(): string {
     return `<svg viewBox="0 0 32 32" style="width:24px;height:24px">` +
       `<circle class="progress-ring-bg" cx="16" cy="16" r="14" fill="none" stroke-width="2.5"/>` +
       `<circle class="progress-ring-fg" cx="16" cy="16" r="14" fill="none" stroke-width="2.5" ` +
@@ -329,17 +340,17 @@
     `</svg>`;
   }
 
-  function setOverlayProgress(percent) {
+  function setOverlayProgress(percent: number): void {
     const btn = document.getElementById(OVERLAY_ID);
     if (!btn) return;
     const fg = btn.querySelector('.progress-ring-fg');
     if (!fg) return;
     const clamped = Math.max(0, Math.min(100, percent));
     const offset = RING_CIRCUMFERENCE - (RING_CIRCUMFERENCE * clamped / 100);
-    fg.setAttribute('stroke-dashoffset', offset);
+    fg.setAttribute('stroke-dashoffset', String(offset));
   }
 
-  function findVideoContainer() {
+  function findVideoContainer(): HTMLElement | null {
     if (isYoutube()) {
       return document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
     }
@@ -352,7 +363,7 @@
     return null;
   }
 
-  function injectOverlayButton() {
+  function injectOverlayButton(): void {
     if (document.getElementById(OVERLAY_ID)) return;
     const container = findVideoContainer();
     if (!container) return;
@@ -379,12 +390,12 @@
     btn.addEventListener('mouseup', (e) => { e.stopPropagation(); });
   }
 
-  function resetBtnState(btn) {
+  function resetBtnState(btn: HTMLElement): void {
     btn.classList.remove('clicked', 'waiting', 'downloading', 'indeterminate', 'done', 'error');
     btn.innerHTML = SVG_DOWNLOAD;
   }
 
-  async function handleOverlayDownload() {
+  async function handleOverlayDownload(): Promise<void> {
     const btn = document.getElementById(OVERLAY_ID);
     if (!btn || btn.classList.contains('downloading') || btn.classList.contains('waiting')) return;
 
@@ -392,7 +403,7 @@
     btn.classList.add('clicked');
     btn.addEventListener('animationend', () => btn.classList.remove('clicked'), { once: true });
 
-    let metadata = extractMetadata();
+    let metadata: VideoMetadata = extractMetadata();
 
     // If in an iframe (Hotmart), request metadata from the top frame which has
     // the sidebar with videoName, videoIndex, sectionIndex
@@ -414,7 +425,7 @@
     }
 
     // Load settings from storage
-    let settings = {};
+    let settings: Record<string, string | number> = {};
     try {
       settings = await chrome.storage.local.get(['prefix', 'concurrency', 'format_hotmart', 'format_youtube', 'format']);
     } catch {}
@@ -435,27 +446,27 @@
     } else if (idx != null) {
       filenameBase = `${idx} ${safeName}`;
     }
-    const trimmedPrefix = prefix.trim();
+    const trimmedPrefix = (prefix as string).trim();
     const filename = trimmedPrefix ? `${trimmedPrefix}${filenameBase}.${format}` : `${filenameBase}.${format}`;
 
     const isTopFrame = window === window.top;
 
     // In top frame (YouTube): use showSaveFilePicker for folder memory.
     // In iframe (Hotmart): use chrome.downloads.download via background script.
-    let fileHandle;
+    let fileHandle: FileSystemFileHandle | undefined;
     if (isTopFrame) {
       // Show waiting state while file picker is open
       btn.classList.add('waiting');
 
-      const mimeTypes = { txt: 'text/plain', srt: 'application/x-subrip', vtt: 'text/vtt' };
+      const mimeTypes: Record<string, string> = { txt: 'text/plain', srt: 'application/x-subrip', vtt: 'text/vtt' };
       try {
-        fileHandle = await window.showSaveFilePicker({
-          suggestedName: filename,
-          types: [{ description: 'Subtitle file', accept: { [mimeTypes[format] || 'text/plain']: [`.${format}`] } }],
+        fileHandle = await showSaveFilePicker({
+          suggestedName: filename as string,
+          types: [{ description: 'Subtitle file', accept: { [mimeTypes[format as string] || 'text/plain']: [`.${format}`] } }],
         });
       } catch (e) {
         btn.classList.remove('waiting');
-        if (e.name === 'AbortError') return;
+        if ((e as Error).name === 'AbortError') return;
         throw e;
       }
 
@@ -477,7 +488,7 @@
 
       if (isYT) {
         // YouTube: fetch first available track (prefer manual over auto)
-        const sorted = [...metadata.captionTracks].sort((a, b) => {
+        const sorted = [...metadata.captionTracks!].sort((a, b) => {
           if (a.kind === 'asr' && b.kind !== 'asr') return 1;
           if (a.kind !== 'asr' && b.kind === 'asr') return -1;
           return 0;
@@ -485,32 +496,39 @@
         const trackUrl = sorted[0].baseUrl.replace(/&fmt=[^&]*/, '') + '&fmt=vtt';
         const result = await chrome.runtime.sendMessage({ type: 'fetchYoutubeTrack', url: trackUrl });
         if (result.error) throw new Error(result.error);
-        cues = parseVTTSimple(result.text);
+        cues = parseWebVTT(result.text);
       } else {
         // Hotmart: need the captured pattern from background
         const tab = await getTabId();
         const resp = await chrome.runtime.sendMessage({ type: 'getPattern', tabId: tab });
         if (!resp || !resp.pattern) throw new Error('No subtitle pattern captured');
 
-        const results = await fetchSegmentsFromOverlay(resp.pattern, concurrency);
+        const results = await fetchSegmentsFromOverlay(resp.pattern, concurrency as number);
         cues = [];
         for (const r of results) {
-          if (r.text) cues.push(...parseVTTSimple(r.text));
+          if (r.text) cues.push(...parseWebVTT(r.text));
         }
       }
 
       if (cues.length === 0) throw new Error('No cues found');
 
       // Deduplicate and sort
-      const unique = deduplicateCuesSimple(cues);
+      const unique = deduplicateCues(cues);
       unique.sort((a, b) => a.startMs - b.startMs);
 
       // Format output
-      const text = formatOutput(unique, format);
+      let text: string;
+      if (format === 'srt') {
+        text = cuesToSrt(unique);
+      } else if (format === 'vtt') {
+        text = cuesToVtt(unique);
+      } else {
+        text = unique.map((c) => c.text).join('\n');
+      }
 
       if (isTopFrame) {
         // Write file via File System Access API
-        const writable = await fileHandle.createWritable();
+        const writable = await fileHandle!.createWritable();
         await writable.write(text);
         await writable.close();
       } else {
@@ -529,108 +547,35 @@
       btn.innerHTML = SVG_ERROR;
       btn.classList.add('error');
       setTimeout(() => resetBtnState(btn), 1500);
-      console.error('Subtitle Extractor:', err.message);
+      console.error('Subtitle Extractor:', (err as Error).message);
     }
   }
 
-  // Lightweight VTT parser (content script can't import lib.js)
-  function parseVTTSimple(vttText) {
-    const cues = [];
-    const lines = vttText.split('\n');
-    let i = 0;
-    while (i < lines.length) {
-      const line = lines[i].trim();
-      const m = line.match(/^(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})/);
-      if (m) {
-        const startMs = parseTs(m[1]);
-        const endMs = parseTs(m[2]);
-        const textLines = [];
-        i++;
-        while (i < lines.length && lines[i].trim() !== '') {
-          textLines.push(lines[i].trim());
-          i++;
-        }
-        const text = textLines.join(' ').replace(/<[^>]+>/g, '').trim();
-        if (text) cues.push({ startMs, endMs, text });
-      } else {
-        i++;
-      }
-    }
-    return cues;
-  }
-
-  function parseTs(ts) {
-    const [h, m, rest] = ts.split(':');
-    const [s, ms] = rest.split('.');
-    return parseInt(h) * 3600000 + parseInt(m) * 60000 + parseInt(s) * 1000 + parseInt(ms);
-  }
-
-  function deduplicateCuesSimple(cues) {
-    const seen = new Set();
-    const exact = [];
-    for (const c of cues) {
-      const key = `${c.startMs}|${c.endMs}|${c.text}`;
-      if (!seen.has(key)) { seen.add(key); exact.push(c); }
-    }
-    const unique = [];
-    for (const c of exact) {
-      if (unique.length > 0 && unique[unique.length - 1].text === c.text) continue;
-      unique.push(c);
-    }
-    return unique;
-  }
-
-  function formatTs(ms, sep) {
-    const h = String(Math.floor(ms / 3600000)).padStart(2, '0');
-    const m = String(Math.floor((ms % 3600000) / 60000)).padStart(2, '0');
-    const s = String(Math.floor((ms % 60000) / 1000)).padStart(2, '0');
-    const ml = String(ms % 1000).padStart(3, '0');
-    return `${h}:${m}:${s}${sep}${ml}`;
-  }
-
-  function formatOutput(cues, format) {
-    if (format === 'srt') {
-      if (cues.length === 0) return '';
-      return cues.map((c, i) =>
-        `${i + 1}\n${formatTs(c.startMs, ',')} --> ${formatTs(c.endMs, ',')}\n${c.text}`
-      ).join('\n\n') + '\n';
-    }
-    if (format === 'vtt') {
-      if (cues.length === 0) return 'WEBVTT\n';
-      return 'WEBVTT\n\n' + cues.map(c =>
-        `${formatTs(c.startMs, '.')} --> ${formatTs(c.endMs, '.')}\n${c.text}`
-      ).join('\n\n') + '\n';
-    }
-    return cues.map(c => c.text).join('\n');
-  }
-
-  async function getTabId() {
+  async function getTabId(): Promise<number | undefined> {
     return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: 'getTabId' }, (resp) => resolve(resp?.tabId));
+      chrome.runtime.sendMessage({ type: 'getTabId' }, (resp: { tabId?: number } | undefined) => resolve(resp?.tabId));
     });
   }
 
-  async function fetchSegmentsFromOverlay(pattern, concurrency) {
-    const results = [];
-    let consecutiveErrors = 0;
-    let seg = 0;
+  async function fetchSegmentsFromOverlay(pattern: { baseUrl: string }, concurrency: number): Promise<Array<{ seg: number; text?: string; error?: unknown }>> {
+    const results: Array<{ seg: number; text?: string; error?: unknown } | undefined> = [];
     const MAX_ERRORS = 3;
     const pool = Math.max(1, concurrency);
-    const inFlight = new Map();
+    const inFlight: Map<number, Promise<void>> = new Map();
     let nextSeg = 0;
     let stopLaunching = false;
     let completedCount = 0;
 
-    function buildUrl(s) {
-      return pattern.baseUrl.replace('{SEG}', s);
+    function buildUrl(s: number) {
+      return pattern.baseUrl.replace('{SEG}', String(s));
     }
 
     function checkStop() {
       let consecutive = 0;
       for (let i = results.length - 1; i >= 0; i--) {
         if (results[i] === undefined) break;
-        if (results[i].error) {
-          if (results[i].seg === 0) break;
+        if (results[i]!.error) {
+          if (results[i]!.seg === 0) break;
           consecutive++;
         } else break;
       }
@@ -641,7 +586,7 @@
       while (inFlight.size < pool && !stopLaunching && nextSeg < 5000) {
         const s = nextSeg++;
         const url = buildUrl(s);
-        const promise = chrome.runtime.sendMessage({ type: 'fetchSegment', url, providerId: 'hotmart' }).then(result => {
+        const promise = chrome.runtime.sendMessage({ type: 'fetchSegment', url, providerId: 'hotmart' }).then((result: { text?: string; error?: unknown }) => {
           results[s] = { seg: s, ...result };
           inFlight.delete(s);
           completedCount++;
@@ -660,13 +605,13 @@
       if (!stopLaunching) launchNext();
     }
 
-    return results.filter(r => r !== undefined);
+    return results.filter((r): r is { seg: number; text?: string; error?: unknown } => r !== undefined);
   }
 
   // ---------------------------------------------------------------------------
   // Init
   // ---------------------------------------------------------------------------
-  function tryInjectOverlay() {
+  function tryInjectOverlay(): void {
     if (isYoutube()) {
       // YouTube: only inject in the top frame
       if (window !== window.top) return;
@@ -707,10 +652,11 @@
     overlayRetries++;
   }, 2000);
 
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((message: { type: string }, _sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void) => {
     if (message.type === 'getMetadata') {
       sendResponse(extractMetadata());
       return true;
     }
   });
+
 })();

@@ -3,13 +3,15 @@
  * Zero Chrome API dependencies — fully testable.
  */
 
+import type { Cue, ParsedSubtitleUrl, FetchResult, SegmentResult, FetchAllSegmentsOptions } from './types.js';
+
 /**
  * Parse a subtitle segment URL and extract the pattern components.
  * Returns null if the URL doesn't match the expected format.
  */
-export function parseSubtitleUrl(url) {
+export function parseSubtitleUrl(url: string): ParsedSubtitleUrl | null {
   const match = url.match(
-    /vod-akm\.play\.hotmart\.com\/video\/([^/]+)\/hls\/[^-]+-(\d+)-textstream_([^=]+)=1000-(\d+)\.webvtt\?(.+)/
+    /[^/]*\.hotmart\.com\/video\/([^/]+)\/hls\/[^-]+-(\d+)-textstream_([^=]+)=1000-(\d+)\.webvtt\?(.+)/
   );
   if (!match) return null;
 
@@ -23,7 +25,7 @@ export function parseSubtitleUrl(url) {
  * Fix UTF-8 mojibake: bytes were interpreted as Latin-1 instead of UTF-8.
  * If text contains Ã (0xC3), try re-encoding as latin-1 bytes then decoding as UTF-8.
  */
-export function fixEncoding(text) {
+export function fixEncoding(text: string): string {
   if (text.includes('\u00C3')) {
     try {
       const bytes = new Uint8Array([...text].map((c) => c.charCodeAt(0)));
@@ -43,8 +45,8 @@ export function fixEncoding(text) {
  * Handles headers (WEBVTT, X-TIMESTAMP-MAP), numeric cue IDs, multi-line cues,
  * and strips HTML tags from cue text.
  */
-export function parseWebVTT(vttText) {
-  const cues = [];
+export function parseWebVTT(vttText: string): Cue[] {
+  const cues: Cue[] = [];
   const lines = vttText.split('\n');
   let i = 0;
 
@@ -77,7 +79,7 @@ export function parseWebVTT(vttText) {
 /**
  * Parse a WebVTT timestamp (HH:MM:SS.mmm) into milliseconds.
  */
-export function parseTimestamp(ts) {
+export function parseTimestamp(ts: string): number {
   const [h, m, rest] = ts.split(':');
   const [s, ms] = rest.split('.');
   return parseInt(h) * 3600000 + parseInt(m) * 60000 + parseInt(s) * 1000 + parseInt(ms);
@@ -89,10 +91,10 @@ export function parseTimestamp(ts) {
  * 2. Sort by startMs so overlap duplicates become adjacent.
  * 3. Collapse consecutive cues with identical text (segment overlap artifacts).
  */
-export function deduplicateCues(cues) {
+export function deduplicateCues(cues: Cue[]): Cue[] {
   // Pass 1: exact dedup
   const seen = new Set();
-  const exactDeduped = [];
+  const exactDeduped: Cue[] = [];
   for (const cue of cues) {
     const key = `${cue.startMs}|${cue.endMs}|${cue.text}`;
     if (!seen.has(key)) {
@@ -105,7 +107,7 @@ export function deduplicateCues(cues) {
   exactDeduped.sort((a, b) => a.startMs - b.startMs);
 
   // Pass 3: collapse consecutive cues with same text
-  const unique = [];
+  const unique: Cue[] = [];
   for (const cue of exactDeduped) {
     if (unique.length > 0 && unique[unique.length - 1].text === cue.text) {
       continue;
@@ -118,7 +120,7 @@ export function deduplicateCues(cues) {
 /**
  * Sort cues by start timestamp, deduplicate, and produce plain text output.
  */
-export function cuesToTranscript(cues) {
+export function cuesToTranscript(cues: Cue[]): string {
   const unique = deduplicateCues(cues);
   return unique.map((c) => c.text).join('\n');
 }
@@ -126,7 +128,7 @@ export function cuesToTranscript(cues) {
 /**
  * Format milliseconds as SRT timestamp: HH:MM:SS,mmm
  */
-export function formatTimestampSrt(ms) {
+export function formatTimestampSrt(ms: number): string {
   const h = String(Math.floor(ms / 3600000)).padStart(2, '0');
   const m = String(Math.floor((ms % 3600000) / 60000)).padStart(2, '0');
   const s = String(Math.floor((ms % 60000) / 1000)).padStart(2, '0');
@@ -137,7 +139,7 @@ export function formatTimestampSrt(ms) {
 /**
  * Format milliseconds as VTT timestamp: HH:MM:SS.mmm
  */
-export function formatTimestampVtt(ms) {
+export function formatTimestampVtt(ms: number): string {
   const h = String(Math.floor(ms / 3600000)).padStart(2, '0');
   const m = String(Math.floor((ms % 3600000) / 60000)).padStart(2, '0');
   const s = String(Math.floor((ms % 60000) / 1000)).padStart(2, '0');
@@ -148,7 +150,7 @@ export function formatTimestampVtt(ms) {
 /**
  * Convert cues to SRT format string.
  */
-export function cuesToSrt(cues) {
+export function cuesToSrt(cues: Cue[]): string {
   const unique = deduplicateCues(cues);
   if (unique.length === 0) return '';
   return unique.map((c, i) =>
@@ -159,7 +161,7 @@ export function cuesToSrt(cues) {
 /**
  * Convert cues to WebVTT format string.
  */
-export function cuesToVtt(cues) {
+export function cuesToVtt(cues: Cue[]): string {
   const unique = deduplicateCues(cues);
   if (unique.length === 0) return 'WEBVTT\n';
   return 'WEBVTT\n\n' + unique.map((c) =>
@@ -170,8 +172,8 @@ export function cuesToVtt(cues) {
 /**
  * Build a segment URL from a base pattern and segment number.
  */
-export function buildSegmentUrl(baseUrl, segmentNumber) {
-  return baseUrl.replace('{SEG}', segmentNumber);
+export function buildSegmentUrl(baseUrl: string, segmentNumber: number | string): string {
+  return baseUrl.replace('{SEG}', String(segmentNumber));
 }
 
 /**
@@ -180,8 +182,8 @@ export function buildSegmentUrl(baseUrl, segmentNumber) {
  * Segment 0 errors are not counted (often returns 400).
  * Returns the collected cues.
  */
-export function processSegmentResults(results, maxConsecutiveErrors = 3) {
-  const allCues = [];
+export function processSegmentResults(results: FetchResult[], maxConsecutiveErrors: number = 3): Cue[] {
+  const allCues: Cue[] = [];
   let consecutiveErrors = 0;
 
   for (let i = 0; i < results.length; i++) {
@@ -193,7 +195,7 @@ export function processSegmentResults(results, maxConsecutiveErrors = 3) {
       if (i === 0) consecutiveErrors = 0;
     } else {
       consecutiveErrors = 0;
-      const cues = parseWebVTT(result.text);
+      const cues = parseWebVTT(result.text!);
       allCues.push(...cues);
     }
   }
@@ -203,35 +205,28 @@ export function processSegmentResults(results, maxConsecutiveErrors = 3) {
 /**
  * Fetch all subtitle segments in parallel using a sliding window.
  * Pure async logic — fetchFn is injected, no Chrome API dependency.
- *
- * @param {Object} options
- * @param {number} options.concurrency - Max parallel requests (clamped to >= 1)
- * @param {function} options.fetchFn - (segmentNumber) => Promise<{ text } | { error }>
- * @param {function} [options.onProgress] - (segmentNumber, totalCompleted) => void
- * @param {number} [options.maxConsecutiveErrors=3] - Stop after this many consecutive errors
- * @returns {Promise<Array<{ seg: number, text?: string, error?: any }>>}
  */
 export async function fetchAllSegmentsParallel({
   concurrency,
   fetchFn,
   onProgress,
   maxConsecutiveErrors = 3,
-}) {
+}: FetchAllSegmentsOptions): Promise<SegmentResult[]> {
   const pool = Math.max(1, concurrency);
-  const results = [];        // ordered by segment number
+  const results: (SegmentResult | undefined)[] = [];  // ordered by segment number
   let nextSeg = 0;           // next segment to launch
   let completed = 0;         // total completed
   let stopLaunching = false;
-  const inFlight = new Map(); // seg -> Promise
+  const inFlight: Map<number, Promise<void>> = new Map(); // seg -> Promise
 
   function checkStopCondition() {
     // Count consecutive errors from the highest completed segment backward
     let consecutive = 0;
     for (let i = results.length - 1; i >= 0; i--) {
       if (results[i] === undefined) break; // gap — not yet resolved
-      if (results[i].error) {
+      if (results[i]!.error) {
         // Segment 0 errors don't count
-        if (results[i].seg === 0) break;
+        if (results[i]!.seg === 0) break;
         consecutive++;
       } else {
         break;
@@ -264,5 +259,5 @@ export async function fetchAllSegmentsParallel({
   }
 
   // Return only the contiguous resolved results (no undefined gaps)
-  return results.filter((r) => r !== undefined);
+  return results.filter((r): r is SegmentResult => r !== undefined);
 }

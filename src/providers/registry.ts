@@ -1,15 +1,11 @@
+import type { Provider } from '../types.js';
 import hotmart from './hotmart.js';
 import youtube from './youtube.js';
 
-const providers = [hotmart, youtube];
+const providers: Provider[] = [hotmart, youtube];
 
-/**
- * Find the provider that matches a page URL.
- * @param {string} url - The page URL to match
- * @returns {object|null} The matched provider or null
- */
-export function getProviderForUrl(url) {
-  let hostname;
+export function getProviderForUrl(url: string): Provider | null {
+  let hostname: string;
   try {
     hostname = new URL(url).hostname;
   } catch {
@@ -19,7 +15,7 @@ export function getProviderForUrl(url) {
   for (const provider of providers) {
     for (const pattern of provider.domains) {
       if (pattern.startsWith('*.')) {
-        const suffix = pattern.slice(1); // e.g. ".hotmart.com"
+        const suffix = pattern.slice(1);
         if (hostname === suffix.slice(1) || hostname.endsWith(suffix)) {
           return provider;
         }
@@ -31,16 +27,10 @@ export function getProviderForUrl(url) {
   return null;
 }
 
-/**
- * Get a provider by its unique ID.
- */
-export function getProviderById(id) {
+export function getProviderById(id: string): Provider | null {
   return providers.find((p) => p.id === id) || null;
 }
 
-/**
- * List all registered providers.
- */
-export function getAllProviders() {
+export function getAllProviders(): Provider[] {
   return providers;
 }

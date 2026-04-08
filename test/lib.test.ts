@@ -13,7 +13,8 @@ import {
   buildSegmentUrl,
   processSegmentResults,
   fetchAllSegmentsParallel,
-} from './lib.js';
+} from '../src/lib.js';
+import type { FetchResult } from '../src/types.js';
 
 // ---------------------------------------------------------------------------
 // URL pattern parsing
@@ -23,29 +24,29 @@ describe('parseSubtitleUrl', () => {
     'https://vod-akm.play.hotmart.com/video/WZEpQvQvLv/hls/WZEpQvQvLv-1740073517000-textstream_pt_br=1000-101.webvtt?hdntl=exp=1774837448~acl=/*~data=hdntl~hmac=ed2a4ae0&app=093b9050';
 
   it('extracts mediaCode', () => {
-    expect(parseSubtitleUrl(SAMPLE_URL).mediaCode).toBe('WZEpQvQvLv');
+    expect(parseSubtitleUrl(SAMPLE_URL)!.mediaCode).toBe('WZEpQvQvLv');
   });
 
   it('extracts timestamp', () => {
-    expect(parseSubtitleUrl(SAMPLE_URL).timestamp).toBe('1740073517000');
+    expect(parseSubtitleUrl(SAMPLE_URL)!.timestamp).toBe('1740073517000');
   });
 
   it('extracts language', () => {
-    expect(parseSubtitleUrl(SAMPLE_URL).lang).toBe('pt_br');
+    expect(parseSubtitleUrl(SAMPLE_URL)!.lang).toBe('pt_br');
   });
 
   it('extracts segment number', () => {
-    expect(parseSubtitleUrl(SAMPLE_URL).segmentNum).toBe('101');
+    expect(parseSubtitleUrl(SAMPLE_URL)!.segmentNum).toBe('101');
   });
 
   it('builds base URL with {SEG} placeholder', () => {
-    const result = parseSubtitleUrl(SAMPLE_URL);
+    const result = parseSubtitleUrl(SAMPLE_URL)!;
     expect(result.baseUrl).toContain('{SEG}');
     expect(result.baseUrl).not.toContain('-101.webvtt');
   });
 
   it('extracts query string', () => {
-    const result = parseSubtitleUrl(SAMPLE_URL);
+    const result = parseSubtitleUrl(SAMPLE_URL)!;
     expect(result.queryString).toContain('hdntl=');
     expect(result.queryString).toContain('app=');
   });
@@ -73,13 +74,24 @@ describe('parseSubtitleUrl', () => {
   it('handles segment number 0', () => {
     const url =
       'https://vod-akm.play.hotmart.com/video/ABC/hls/ABC-999-textstream_en=1000-0.webvtt?tok=x';
-    expect(parseSubtitleUrl(url).segmentNum).toBe('0');
+    expect(parseSubtitleUrl(url)!.segmentNum).toBe('0');
   });
 
   it('handles language codes with underscores', () => {
     const url =
       'https://vod-akm.play.hotmart.com/video/X/hls/X-1-textstream_zh_hans=1000-5.webvtt?q=1';
-    expect(parseSubtitleUrl(url).lang).toBe('zh_hans');
+    expect(parseSubtitleUrl(url)!.lang).toBe('zh_hans');
+  });
+
+  it('parses contentplayer.hotmart.com URLs', () => {
+    const url =
+      'https://contentplayer.hotmart.com/video/DZmJO1nyRz/hls/DZmJO1nyRz-1775573079000-textstream_pt_br=1000-467.webvtt?Policy=eyJ&app=f518eb50';
+    const result = parseSubtitleUrl(url)!;
+    expect(result).not.toBeNull();
+    expect(result.mediaCode).toBe('DZmJO1nyRz');
+    expect(result.lang).toBe('pt_br');
+    expect(result.segmentNum).toBe('467');
+    expect(result.timestamp).toBe('1775573079000');
   });
 });
 
@@ -632,7 +644,7 @@ describe('fetchAllSegmentsParallel', () => {
       { error: 404 },
       { error: 404 },
     ];
-    const fetchFn = (seg) => Promise.resolve(responses[seg] || { error: 404 });
+    const fetchFn = (seg: number) => Promise.resolve(responses[seg] || { error: 404 });
     const results = await fetchAllSegmentsParallel({ concurrency: 2, fetchFn });
     // Should have results for segments 0-5 (stops after 3 consecutive errors at tail)
     expect(results.filter(r => r.text)).toHaveLength(3);
@@ -644,7 +656,7 @@ describe('fetchAllSegmentsParallel', () => {
   it('respects concurrency limit', async () => {
     let maxInFlight = 0;
     let inFlight = 0;
-    const fetchFn = (seg) => {
+    const fetchFn = (seg: number): Promise<FetchResult> => {
       inFlight++;
       maxInFlight = Math.max(maxInFlight, inFlight);
       return new Promise((resolve) => {
@@ -660,8 +672,8 @@ describe('fetchAllSegmentsParallel', () => {
   });
 
   it('stops after 3 consecutive errors at the tail', async () => {
-    const fetched = [];
-    const fetchFn = (seg) => {
+    const fetched: number[] = [];
+    const fetchFn = (seg: number): Promise<FetchResult> => {
       fetched.push(seg);
       if (seg < 10) return Promise.resolve({ text: 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi' });
       return Promise.resolve({ error: 404 });
@@ -680,14 +692,14 @@ describe('fetchAllSegmentsParallel', () => {
       { error: 404 },  // seg 3
       { error: 404 },  // seg 4 — 3 consecutive → stop
     ];
-    const fetchFn = (seg) => Promise.resolve(responses[seg] || { error: 404 });
+    const fetchFn = (seg: number) => Promise.resolve(responses[seg] || { error: 404 });
     const results = await fetchAllSegmentsParallel({ concurrency: 1, fetchFn });
     expect(results.filter(r => r.text)).toHaveLength(1);
   });
 
   it('calls onProgress for each completed segment', async () => {
-    const progressCalls = [];
-    const fetchFn = (seg) => Promise.resolve(
+    const progressCalls: Array<{ seg: number; total: number }> = [];
+    const fetchFn = (seg: number) => Promise.resolve(
       seg < 3 ? { text: 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi' } : { error: 404 }
     );
     await fetchAllSegmentsParallel({
@@ -703,7 +715,7 @@ describe('fetchAllSegmentsParallel', () => {
   });
 
   it('clamps concurrency to minimum of 1', async () => {
-    const fetchFn = (seg) => Promise.resolve(
+    const fetchFn = (seg: number) => Promise.resolve(
       seg < 2 ? { text: 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi' } : { error: 404 }
     );
     // Should not hang or error with concurrency 0
@@ -712,8 +724,8 @@ describe('fetchAllSegmentsParallel', () => {
   });
 
   it('handles all-error case and stops quickly', async () => {
-    const fetched = [];
-    const fetchFn = (seg) => {
+    const fetched: number[] = [];
+    const fetchFn = (seg: number) => {
       fetched.push(seg);
       return Promise.resolve({ error: 404 });
     };
@@ -734,13 +746,13 @@ describe('fetchAllSegmentsParallel', () => {
       { error: 404 },  // seg 5
       { error: 404 },  // seg 6 — 3 consecutive → stop
     ];
-    const fetchFn = (seg) => Promise.resolve(responses[seg] || { error: 404 });
+    const fetchFn = (seg: number) => Promise.resolve(responses[seg] || { error: 404 });
     const results = await fetchAllSegmentsParallel({ concurrency: 1, fetchFn });
     expect(results.filter(r => r.text)).toHaveLength(2);
   });
 
   it('respects custom maxConsecutiveErrors', async () => {
-    const fetchFn = (seg) => Promise.resolve(
+    const fetchFn = (seg: number) => Promise.resolve(
       seg === 0 ? { text: 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi' } : { error: 404 }
     );
     const results = await fetchAllSegmentsParallel({

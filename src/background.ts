@@ -1,6 +1,7 @@
 import { getProviderForUrl, getAllProviders } from './providers/registry.js';
+import type { CapturedPattern, ProviderInfo, ExtensionMessage } from './types.js';
 
-const capturedPatterns = {};
+const capturedPatterns: Record<number, CapturedPattern> = {};
 
 // Register webRequest listeners for all providers that have filters
 for (const provider of getAllProviders()) {
@@ -35,7 +36,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 /**
  * Normalise path separators to forward slashes.
  */
-function normPath(p) {
+function normPath(p: string): string {
   return p.replace(/\\/g, '/');
 }
 
@@ -43,7 +44,7 @@ function normPath(p) {
  * Extract the directory portion of a path (everything before the last slash).
  * Returns '' if the path has no directory component.
  */
-function dirName(p) {
+function dirName(p: string): string {
   const n = normPath(p);
   const i = n.lastIndexOf('/');
   return i > 0 ? n.substring(0, i) : '';
@@ -62,8 +63,8 @@ function dirName(p) {
  *   lastSaveDir   – relative dir to prepend (e.g. "my-subtitles" or "")
  *   downloadsRoot – absolute path to Chrome's default downloads folder
  */
-async function handleDownloadFile(filename, content) {
-  const stored = await chrome.storage.local.get(['lastSaveDir', 'downloadsRoot']);
+async function handleDownloadFile(filename: string, content: string): Promise<void> {
+  const stored = await chrome.storage.local.get(['lastSaveDir', 'downloadsRoot']) as { lastSaveDir?: string; downloadsRoot?: string };
   const lastDir = stored.lastSaveDir || '';
   const knownRoot = stored.downloadsRoot || '';
 
@@ -81,7 +82,7 @@ async function handleDownloadFile(filename, content) {
     url = 'data:text/plain;charset=utf-8,' + encodeURIComponent(content);
   }
 
-  const downloadId = await new Promise((resolve, reject) => {
+  const downloadId = await new Promise<number>((resolve, reject) => {
     chrome.downloads.download(
       { url, filename: targetFilename, saveAs: true },
       (id) => {
@@ -89,7 +90,7 @@ async function handleDownloadFile(filename, content) {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
         } else {
-          resolve(id);
+          resolve(id!);
         }
       }
     );
@@ -107,14 +108,14 @@ async function handleDownloadFile(filename, content) {
 /**
  * Watches a download for completion and persists the chosen save directory.
  */
-function trackDownloadDirectory(downloadId, targetFilename, knownRoot) {
+function trackDownloadDirectory(downloadId: number, targetFilename: string, knownRoot: string): void {
   const TIMEOUT_MS = 60_000;
 
   const cleanup = () => chrome.downloads.onChanged.removeListener(listener);
 
   const timeout = setTimeout(cleanup, TIMEOUT_MS);
 
-  function listener(delta) {
+  function listener(delta: chrome.downloads.DownloadDelta): void {
     if (delta.id !== downloadId || !delta.state) return;
 
     if (delta.state.current === 'complete') {
@@ -142,7 +143,7 @@ function trackDownloadDirectory(downloadId, targetFilename, knownRoot) {
  * requested, and (possibly) the previously-known downloads root, compute and
  * store the relative save directory for next time.
  */
-function persistDirectory(absPath, targetFilename, knownRoot) {
+function persistDirectory(absPath: string, targetFilename: string, knownRoot: string): void {
   const absDir = dirName(absPath);
   const targetNorm = normPath(targetFilename);
 
@@ -169,16 +170,16 @@ function persistDirectory(absPath, targetFilename, knownRoot) {
   });
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: Record<string, unknown>, sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void) => {
   if (message.type === 'getPattern') {
-    const pattern = capturedPatterns[message.tabId] || null;
+    const pattern = capturedPatterns[message.tabId as number] || null;
     if (pattern) {
       sendResponse({ pattern });
     } else {
       // Service worker may have restarted, losing in-memory cache — check session storage
-      chrome.storage.session.get(`pattern_${message.tabId}`).then((stored) => {
-        const restored = stored[`pattern_${message.tabId}`] || null;
-        if (restored) capturedPatterns[message.tabId] = restored;
+      chrome.storage.session.get(`pattern_${message.tabId as number}`).then((stored) => {
+        const restored = stored[`pattern_${message.tabId as number}`] || null;
+        if (restored) capturedPatterns[message.tabId as number] = restored as CapturedPattern;
         sendResponse({ pattern: restored });
       });
     }
@@ -201,8 +202,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'getProviderForUrl') {
-    const provider = getProviderForUrl(message.url);
-    sendResponse({ provider: provider ? { id: provider.id, name: provider.name, formats: provider.formats, stub: provider.stub || false } : null });
+    const provider = getProviderForUrl(message.url as string);
+    const info: ProviderInfo | null = provider ? { id: provider.id, name: provider.name, formats: provider.formats, stub: false } : null;
+    sendResponse({ provider: info });
     return true;
   }
 
@@ -212,30 +214,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ error: 'YouTube provider not found' });
       return true;
     }
-    provider.fetchSubtitle(message.url)
+    provider.fetchSubtitle(message.url as string)
       .then((result) => sendResponse(result))
-      .catch((err) => sendResponse({ error: err.message }));
+      .catch((err) => sendResponse({ error: (err as Error).message }));
     return true;
   }
 
   if (message.type === 'downloadFile') {
-    handleDownloadFile(message.filename, message.content).then(
+    handleDownloadFile(message.filename as string, message.content as string).then(
       () => sendResponse({ ok: true }),
-      (err) => sendResponse({ ok: false, error: err.message })
+      (err) => sendResponse({ ok: false, error: (err as Error).message })
     );
     return true;
   }
 
   if (message.type === 'fetchSegment') {
-    const providerId = message.providerId || 'hotmart';
+    const providerId = (message.providerId as string) || 'hotmart';
     const provider = getAllProviders().find((p) => p.id === providerId);
     if (!provider) {
       sendResponse({ error: 'Unknown provider' });
       return true;
     }
-    provider.fetchSubtitle(message.url)
+    provider.fetchSubtitle(message.url as string)
       .then((result) => sendResponse(result))
-      .catch((err) => sendResponse({ error: err.message }));
+      .catch((err) => sendResponse({ error: (err as Error).message }));
     return true;
   }
 });

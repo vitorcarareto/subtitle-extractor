@@ -18,7 +18,7 @@
       ]
     },
     "condition": {
-      "urlFilter": "||vod-akm.play.hotmart.com",
+      "requestDomains": ["vod-akm.play.hotmart.com", "contentplayer.hotmart.com"],
       "resourceTypes": ["xmlhttprequest"]
     }
   }

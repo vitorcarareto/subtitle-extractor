@@ -21,7 +21,6 @@
     ]
   },
   "host_permissions": [
-    "*://vod-akm.play.hotmart.com/*",
     "*://*.hotmart.com/*",
     "*://*.youtube.com/*"
   ],
