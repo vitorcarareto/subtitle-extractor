@@ -7,7 +7,9 @@
     "dev": "vite build --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prerelease": "pnpm build && cd dist && rm -rf _metadata && zip -r -X --exclude='*.DS_Store' ../subtitle-extractor-v$(node -p \"require('../package.json').version\").zip . && cd ..",
+    "release": "V=$(node -p \"require('./package.json').version\") && pnpm prerelease && gh release create v$V subtitle-extractor-v$V.zip --title \"v$V\" --notes \"Release v$V\""
   },
   "keywords": [],
   "author": "",
