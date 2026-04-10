@@ -355,8 +355,8 @@ export function parseYouTubeCaptionTracksFromHtml(scriptText: string): CaptionTr
  */
 export function parseHotmartMetadata(data: HotmartNextData): { mediaCode: string | null; mediaTitle: string | null } {
   const props = data?.props?.pageProps;
-  const mediaCode = props?.mediaCode || props?.applicationData?.mediaCode || null;
-  const mediaTitle = props?.mediaTitle || props?.applicationData?.mediaTitle || null;
+  const mediaCode = props?.mediaCode ?? props?.applicationData?.mediaCode ?? null;
+  const mediaTitle = props?.mediaTitle ?? props?.applicationData?.mediaTitle ?? null;
   return { mediaCode, mediaTitle };
 }
 
