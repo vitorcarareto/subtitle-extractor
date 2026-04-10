@@ -17,8 +17,12 @@ import {
   buildSegmentUrl,
   processSegmentResults,
   fetchAllSegmentsParallel,
+  parseYouTubeCaptionTracks,
+  parseYouTubeCaptionTracksFromHtml,
+  parseHotmartMetadata,
+  parseHotmartMetadataFromHtml,
 } from '../src/lib.js';
-import type { FetchResult } from '../src/types.js';
+import type { FetchResult, YouTubePlayerResponse, HotmartNextData } from '../src/types.js';
 
 // ---------------------------------------------------------------------------
 // URL pattern parsing
@@ -946,6 +950,61 @@ describe('parseYouTubeJson3', () => {
 });
 
 // ---------------------------------------------------------------------------
+// parseYouTubeCaptionTracks
+// ---------------------------------------------------------------------------
+describe('parseYouTubeCaptionTracks', () => {
+  it('extracts caption tracks from player response', () => {
+    const response: YouTubePlayerResponse = {
+      captions: {
+        playerCaptionsTracklistRenderer: {
+          captionTracks: [
+            { baseUrl: 'https://www.youtube.com/api/timedtext?lang=en', languageCode: 'en', name: { simpleText: 'English' }, kind: '' },
+            { baseUrl: 'https://www.youtube.com/api/timedtext?lang=pt', languageCode: 'pt', name: { simpleText: 'Portuguese' }, kind: 'asr' },
+          ],
+        },
+      },
+    };
+    const tracks = parseYouTubeCaptionTracks(response);
+    expect(tracks).toHaveLength(2);
+    expect(tracks![0]).toEqual({ baseUrl: 'https://www.youtube.com/api/timedtext?lang=en', languageCode: 'en', name: 'English', kind: '' });
+    expect(tracks![1].kind).toBe('asr');
+  });
+
+  it('uses languageCode as name fallback when simpleText is missing', () => {
+    const response: YouTubePlayerResponse = { captions: { playerCaptionsTracklistRenderer: { captionTracks: [{ baseUrl: 'https://example.com', languageCode: 'fr' }] } } };
+    const tracks = parseYouTubeCaptionTracks(response);
+    expect(tracks![0].name).toBe('fr');
+    expect(tracks![0].kind).toBe('');
+  });
+
+  it('returns null when captions is missing', () => { expect(parseYouTubeCaptionTracks({})).toBeNull(); });
+  it('returns null when captionTracks is empty', () => { expect(parseYouTubeCaptionTracks({ captions: { playerCaptionsTracklistRenderer: { captionTracks: [] } } })).toBeNull(); });
+  it('returns null when nested structure is missing', () => { expect(parseYouTubeCaptionTracks({ captions: {} })).toBeNull(); });
+});
+
+// ---------------------------------------------------------------------------
+// parseYouTubeCaptionTracksFromHtml
+// ---------------------------------------------------------------------------
+describe('parseYouTubeCaptionTracksFromHtml', () => {
+  it('extracts caption tracks from script content', () => {
+    const html = `var ytInitialPlayerResponse = {"captions":{"playerCaptionsTracklistRenderer":{"captionTracks":[{"baseUrl":"https://example.com/api/timedtext?lang=en","languageCode":"en","name":{"simpleText":"English"},"kind":""}]}}};`;
+    const tracks = parseYouTubeCaptionTracksFromHtml(html);
+    expect(tracks).toHaveLength(1);
+    expect(tracks![0]).toEqual({ baseUrl: 'https://example.com/api/timedtext?lang=en', languageCode: 'en', name: 'English', kind: '' });
+  });
+
+  it('returns null when no captionTracks in text', () => { expect(parseYouTubeCaptionTracksFromHtml('var x = {};')).toBeNull(); });
+  it('returns null when captionTracks JSON is malformed', () => { expect(parseYouTubeCaptionTracksFromHtml('"captionTracks":[{invalid json}]')).toBeNull(); });
+
+  it('handles escaped characters in baseUrl', () => {
+    const html = `"captionTracks":[{"baseUrl":"https://example.com/api?v=123\\u0026lang=en","languageCode":"en"}]`;
+    const tracks = parseYouTubeCaptionTracksFromHtml(html);
+    expect(tracks).toHaveLength(1);
+    expect(tracks![0].baseUrl).toContain('lang=en');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // parseSubtitleText (format auto-detection)
 // ---------------------------------------------------------------------------
 describe('parseSubtitleText', () => {
@@ -1044,5 +1103,50 @@ describe('sortTracksManualFirst', () => {
 
   it('handles empty array', () => {
     expect(sortTracksManualFirst([])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseHotmartMetadata
+// ---------------------------------------------------------------------------
+describe('parseHotmartMetadata', () => {
+  it('extracts mediaCode and mediaTitle from pageProps', () => {
+    const data: HotmartNextData = { props: { pageProps: { mediaCode: 'ABC123', mediaTitle: 'My Video' } } };
+    expect(parseHotmartMetadata(data)).toEqual({ mediaCode: 'ABC123', mediaTitle: 'My Video' });
+  });
+
+  it('falls back to applicationData', () => {
+    const data: HotmartNextData = { props: { pageProps: { applicationData: { mediaCode: 'XYZ789', mediaTitle: 'Nested Title' } } } };
+    expect(parseHotmartMetadata(data)).toEqual({ mediaCode: 'XYZ789', mediaTitle: 'Nested Title' });
+  });
+
+  it('prefers top-level props over applicationData', () => {
+    const data: HotmartNextData = { props: { pageProps: { mediaCode: 'TOP', mediaTitle: 'Top Title', applicationData: { mediaCode: 'NESTED', mediaTitle: 'Nested Title' } } } };
+    expect(parseHotmartMetadata(data)).toEqual({ mediaCode: 'TOP', mediaTitle: 'Top Title' });
+  });
+
+  it('returns nulls when props are empty', () => { expect(parseHotmartMetadata({})).toEqual({ mediaCode: null, mediaTitle: null }); });
+  it('returns nulls when structure is missing', () => { expect(parseHotmartMetadata({ props: {} })).toEqual({ mediaCode: null, mediaTitle: null }); });
+});
+
+// ---------------------------------------------------------------------------
+// parseHotmartMetadataFromHtml
+// ---------------------------------------------------------------------------
+describe('parseHotmartMetadataFromHtml', () => {
+  it('extracts mediaCode and mediaTitle from script text', () => {
+    const html = `window.__data = {"mediaCode":"WZEpQvQvLv","mediaTitle":"Lesson 1: Introduction"};`;
+    expect(parseHotmartMetadataFromHtml(html)).toEqual({ mediaCode: 'WZEpQvQvLv', mediaTitle: 'Lesson 1: Introduction' });
+  });
+
+  it('extracts mediaCode when mediaTitle is absent', () => {
+    expect(parseHotmartMetadataFromHtml('{"mediaCode":"ABC123","other":"value"}')).toEqual({ mediaCode: 'ABC123', mediaTitle: null });
+  });
+
+  it('returns nulls when neither field is found', () => {
+    expect(parseHotmartMetadataFromHtml('var x = { foo: "bar" };')).toEqual({ mediaCode: null, mediaTitle: null });
+  });
+
+  it('handles whitespace in JSON', () => {
+    expect(parseHotmartMetadataFromHtml('"mediaCode" : "XYZ" , "mediaTitle" : "My Title"')).toEqual({ mediaCode: 'XYZ', mediaTitle: 'My Title' });
   });
 });
