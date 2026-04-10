@@ -9,6 +9,7 @@
     "declarativeNetRequest",
     "storage",
     "activeTab",
+    "scripting",
     "downloads"
   ],
   "declarative_net_request": {

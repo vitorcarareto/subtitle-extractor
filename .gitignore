@@ -4,3 +4,4 @@ _metadata/
 dist/
 .claude/
 coverage/
+.worktrees/

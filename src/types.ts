@@ -60,7 +60,7 @@ export type ExtensionMessage =
   | { type: 'getMetadata' }
   | { type: 'metadata'; mediaCode: string | null; mediaTitle: string | null; videoName: string | null; videoIndex: number | null; sectionIndex?: number | null; captionTracks?: CaptionTrack[] | null }
   | { type: 'getProviderForUrl'; url: string }
-  | { type: 'fetchYoutubeTrack'; url: string }
+  | { type: 'fetchYoutubeTrack'; tabId: number; lang?: string }
   | { type: 'downloadFile'; content: string; filename: string }
   | { type: 'fetchSegment'; url: string; providerId?: string };
 

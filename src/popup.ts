@@ -6,7 +6,7 @@ declare function showSaveFilePicker(options?: {
   }>;
 }): Promise<FileSystemFileHandle>;
 
-import { buildSegmentUrl, cuesToSrt, cuesToVtt, deduplicateCues, fetchAllSegmentsParallel, parseWebVTT } from './lib.js';
+import { buildSegmentUrl, cuesToSrt, cuesToVtt, deduplicateCues, extractLangFromUrl, fetchAllSegmentsParallel, parseWebVTT, parseSubtitleText, sortTracksManualFirst } from './lib.js';
 import type { Cue, CapturedPattern, ProviderInfo, VideoMetadata } from './types.js';
 
 const statusBox = document.getElementById('statusBox')!;
@@ -135,11 +135,7 @@ async function init(): Promise<void> {
         langRow.style.display = 'flex';
         langSelect.innerHTML = '';
         // Sort: manual captions first, then auto-generated
-        const sorted = [...metadata.captionTracks].sort((a, b) => {
-          if (a.kind === 'asr' && b.kind !== 'asr') return 1;
-          if (a.kind !== 'asr' && b.kind === 'asr') return -1;
-          return 0;
-        });
+        const sorted = sortTracksManualFirst(metadata.captionTracks);
         for (const track of sorted) {
           const opt = document.createElement('option');
           opt.value = track.baseUrl;
@@ -291,16 +287,25 @@ async function fetchYoutubeTrack(): Promise<Cue[]> {
   const trackUrl = langSelect.value;
   if (!trackUrl) throw new Error('No caption track selected');
 
-  // Append &fmt=vtt to get WebVTT format
-  const vttUrl = trackUrl.replace(/&fmt=[^&]*/, '') + '&fmt=vtt';
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) throw new Error('No active tab');
+
+  const lang = extractLangFromUrl(trackUrl);
 
   setProgress(0, false);
-  const result = await chrome.runtime.sendMessage({ type: 'fetchYoutubeTrack', url: vttUrl }) as { text?: string; error?: string };
+  // Fetch via background → chrome.scripting.executeScript in page's MAIN world.
+  // The injected script intercepts YouTube player's own subtitle request (which
+  // includes the required pot token) by triggering a caption track load.
+  const result = await chrome.runtime.sendMessage({
+    type: 'fetchYoutubeTrack',
+    lang,
+    tabId: tab.id,
+  }) as { text?: string; error?: string };
   setProgress(1, true);
 
   if (result.error) throw new Error(`Failed to fetch captions: ${result.error}`);
 
-  return parseWebVTT(result.text!);
+  return parseSubtitleText(result.text!);
 }
 
 async function fetchAllSegments(pattern: CapturedPattern): Promise<Cue[]> {

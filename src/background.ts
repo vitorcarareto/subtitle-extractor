@@ -209,13 +209,111 @@ chrome.runtime.onMessage.addListener((message: Record<string, unknown>, sender: 
   }
 
   if (message.type === 'fetchYoutubeTrack') {
-    const provider = getAllProviders().find((p) => p.id === 'youtube');
-    if (!provider) {
-      sendResponse({ error: 'YouTube provider not found' });
+    const tabId = message.tabId as number | undefined;
+    const lang = message.lang as string | undefined;
+    if (!tabId) {
+      sendResponse({ error: 'No tabId provided' });
       return true;
     }
-    provider.fetchSubtitle(message.url as string)
-      .then((result) => sendResponse(result))
+    // Intercept YouTube player's own subtitle fetch (which includes the
+    // required pot token) by monkey-patching fetch/XHR in the page's MAIN
+    // world, then triggering a caption track load via the player API.
+    chrome.scripting.executeScript({
+      target: { tabId, frameIds: [0] },
+      world: 'MAIN',
+      func: (trackLang: string | undefined) => {
+        return new Promise<{ text?: string; error?: string }>((resolve) => {
+          const origFetch = window.fetch;
+          const origXHROpen = XMLHttpRequest.prototype.open;
+          const origXHRSend = XMLHttpRequest.prototype.send;
+          const timeout = setTimeout(() => done({ error: 'Timeout waiting for subtitle response' }), 10000);
+
+          let settled = false;
+          function done(result: { text?: string; error?: string }) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            window.fetch = origFetch;
+            XMLHttpRequest.prototype.open = origXHROpen;
+            XMLHttpRequest.prototype.send = origXHRSend;
+            resolve(result);
+          }
+
+          function isTimedtextUrl(url: string) {
+            return url.includes('/api/timedtext');
+          }
+
+          // Intercept fetch
+          window.fetch = function (...args: Parameters<typeof fetch>) {
+            const url = typeof args[0] === 'string' ? args[0] : (args[0] as Request).url;
+            if (isTimedtextUrl(url)) {
+              return origFetch.apply(this, args).then(async (response) => {
+                const text = await response.clone().text();
+                if (text.length > 0) done({ text });
+                return response;
+              });
+            }
+            return origFetch.apply(this, args);
+          };
+
+          // Intercept XMLHttpRequest
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (XMLHttpRequest.prototype as any).open = function (...openArgs: unknown[]) {
+            (this as XMLHttpRequest & { __url?: string }).__url = String(openArgs[1]);
+            return origXHROpen.apply(this, openArgs as any);
+          };
+          XMLHttpRequest.prototype.send = function (...args: [Document | XMLHttpRequestBodyInit | null | undefined]) {
+            const xhrUrl = (this as XMLHttpRequest & { __url?: string }).__url || '';
+            if (isTimedtextUrl(xhrUrl)) {
+              this.addEventListener('load', function () {
+                if (this.responseText?.length > 0) done({ text: this.responseText });
+              });
+            }
+            return origXHRSend.apply(this, args);
+          };
+
+          // Trigger the player to load the desired caption track
+          try {
+            const player = document.querySelector('#movie_player') as HTMLElement & {
+              setOption?: (module: string, option: string, value: unknown) => void;
+              getPlayerResponse?: () => {
+                captions?: {
+                  playerCaptionsTracklistRenderer?: {
+                    captionTracks?: Array<{ languageCode: string; vssId: string }>;
+                  };
+                };
+              };
+            };
+
+            if (!player?.setOption) return done({ error: 'YouTube player not found' });
+
+            const tracks = player.getPlayerResponse?.()
+              ?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+            const target = trackLang
+              ? tracks.find((t) => t.languageCode === trackLang)
+              : tracks[0];
+
+            if (!target) return done({ error: 'Caption track not found for lang: ' + trackLang });
+
+            // Toggle captions off then on to force a fresh fetch
+            player.setOption('captions', 'track', {});
+            setTimeout(() => {
+              player.setOption!('captions', 'track', {
+                languageCode: target.languageCode,
+                vssId: target.vssId,
+              });
+            }, 100);
+          } catch (err) {
+            done({ error: String(err) });
+          }
+        });
+      },
+      args: [lang ?? undefined],
+    })
+      .then((results) => {
+        const result = results?.[0]?.result as { text?: string; error?: string } | undefined;
+        sendResponse(result || { error: 'No result from page script' });
+      })
       .catch((err) => sendResponse({ error: (err as Error).message }));
     return true;
   }

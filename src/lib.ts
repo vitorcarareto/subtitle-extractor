@@ -1,5 +1,5 @@
 /**
- * Pure logic functions for Hotmart subtitle extraction.
+ * Pure logic functions for subtitle parsing and formatting.
  * Zero Chrome API dependencies — fully testable.
  */
 
@@ -54,7 +54,7 @@ export function parseWebVTT(vttText: string): Cue[] {
     const line = lines[i].trim();
 
     const tsMatch = line.match(
-      /^(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})/
+      /^((?:\d+:)?\d{2}:\d{2}\.\d{3})\s*-->\s*((?:\d+:)?\d{2}:\d{2}\.\d{3})/
     );
     if (tsMatch) {
       const startMs = parseTimestamp(tsMatch[1]);
@@ -77,12 +77,78 @@ export function parseWebVTT(vttText: string): Cue[] {
 }
 
 /**
- * Parse a WebVTT timestamp (HH:MM:SS.mmm) into milliseconds.
+ * Parse YouTube's json3/pb3 subtitle format into cues.
+ * Events with `segs` arrays contain subtitle text; others are window/style setup.
+ */
+export function parseYouTubeJson3(jsonText: string): Cue[] {
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(jsonText);
+  } catch {
+    return [];
+  }
+  const events: Array<{ tStartMs?: number; dDurationMs?: number; segs?: Array<{ utf8?: string }> }> = (data.events as typeof events) || [];
+  const cues: Cue[] = [];
+
+  for (const event of events) {
+    if (!event.segs || event.tStartMs == null || event.dDurationMs == null) continue;
+    const text = event.segs
+      .map((seg) => seg.utf8 || '')
+      .join('')
+      .replace(/\n/g, ' ')
+      .trim();
+    if (!text) continue;
+    cues.push({
+      startMs: event.tStartMs,
+      endMs: event.tStartMs + event.dDurationMs,
+      text,
+    });
+  }
+  return cues;
+}
+
+/**
+ * Auto-detect subtitle format (json3 vs VTT) and parse accordingly.
+ */
+export function parseSubtitleText(text: string): Cue[] {
+  return text.trimStart().startsWith('{') ? parseYouTubeJson3(text) : parseWebVTT(text);
+}
+
+/**
+ * Extract the lang query parameter from a URL.
+ */
+export function extractLangFromUrl(url: string): string | undefined {
+  return url.match(/[?&]lang=([^&]*)/)?.[1] || undefined;
+}
+
+/**
+ * Sort caption tracks with manual captions before auto-generated (ASR).
+ */
+export function sortTracksManualFirst<T extends { kind: string }>(tracks: T[]): T[] {
+  return [...tracks].sort((a, b) => {
+    if (a.kind === 'asr' && b.kind !== 'asr') return 1;
+    if (a.kind !== 'asr' && b.kind === 'asr') return -1;
+    return 0;
+  });
+}
+
+const MS_PER_SECOND = 1000;
+const MS_PER_MINUTE = 60000;
+const MS_PER_HOUR = 3600000;
+
+/**
+ * Parse a WebVTT timestamp (HH:MM:SS.mmm or MM:SS.mmm) into milliseconds.
  */
 export function parseTimestamp(ts: string): number {
-  const [h, m, rest] = ts.split(':');
-  const [s, ms] = rest.split('.');
-  return parseInt(h) * 3600000 + parseInt(m) * 60000 + parseInt(s) * 1000 + parseInt(ms);
+  const parts = ts.split(':');
+  if (parts.length === 2) {
+    // MM:SS.mmm
+    const [s, ms] = parts[1].split('.');
+    return parseInt(parts[0]) * MS_PER_MINUTE + parseInt(s) * MS_PER_SECOND + parseInt(ms);
+  }
+  // HH:MM:SS.mmm
+  const [s, ms] = parts[2].split('.');
+  return parseInt(parts[0]) * MS_PER_HOUR + parseInt(parts[1]) * MS_PER_MINUTE + parseInt(s) * MS_PER_SECOND + parseInt(ms);
 }
 
 /**
@@ -125,27 +191,19 @@ export function cuesToTranscript(cues: Cue[]): string {
   return unique.map((c) => c.text).join('\n');
 }
 
-/**
- * Format milliseconds as SRT timestamp: HH:MM:SS,mmm
- */
-export function formatTimestampSrt(ms: number): string {
-  const h = String(Math.floor(ms / 3600000)).padStart(2, '0');
-  const m = String(Math.floor((ms % 3600000) / 60000)).padStart(2, '0');
-  const s = String(Math.floor((ms % 60000) / 1000)).padStart(2, '0');
-  const mil = String(ms % 1000).padStart(3, '0');
-  return `${h}:${m}:${s},${mil}`;
+function formatTimestamp(ms: number, sep: string): string {
+  const h = String(Math.floor(ms / MS_PER_HOUR)).padStart(2, '0');
+  const m = String(Math.floor((ms % MS_PER_HOUR) / MS_PER_MINUTE)).padStart(2, '0');
+  const s = String(Math.floor((ms % MS_PER_MINUTE) / MS_PER_SECOND)).padStart(2, '0');
+  const mil = String(ms % MS_PER_SECOND).padStart(3, '0');
+  return `${h}:${m}:${s}${sep}${mil}`;
 }
 
-/**
- * Format milliseconds as VTT timestamp: HH:MM:SS.mmm
- */
-export function formatTimestampVtt(ms: number): string {
-  const h = String(Math.floor(ms / 3600000)).padStart(2, '0');
-  const m = String(Math.floor((ms % 3600000) / 60000)).padStart(2, '0');
-  const s = String(Math.floor((ms % 60000) / 1000)).padStart(2, '0');
-  const mil = String(ms % 1000).padStart(3, '0');
-  return `${h}:${m}:${s}.${mil}`;
-}
+/** Format milliseconds as SRT timestamp: HH:MM:SS,mmm */
+export const formatTimestampSrt = (ms: number) => formatTimestamp(ms, ',');
+
+/** Format milliseconds as VTT timestamp: HH:MM:SS.mmm */
+export const formatTimestampVtt = (ms: number) => formatTimestamp(ms, '.');
 
 /**
  * Convert cues to SRT format string.
