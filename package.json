@@ -1,6 +1,7 @@
 {
   "name": "hotmart-subtitle-extractor",
   "version": "1.0.0",
+  "packageManager": "pnpm@10.26.2",
   "description": "",
   "scripts": {
     "build": "vite build && vite build -c vite.config.content.ts",
@@ -16,6 +17,7 @@
   "license": "ISC",
   "devDependencies": {
     "@types/chrome": "^0.1.38",
+    "@vitest/coverage-v8": "^4.1.4",
     "typescript": "^6.0.2",
     "vite": "^8.0.3",
     "vitest": "^4.1.2"
