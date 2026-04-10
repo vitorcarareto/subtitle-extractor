@@ -240,7 +240,7 @@ chrome.runtime.onMessage.addListener((message: Record<string, unknown>, sender: 
           }
 
           function isTimedtextUrl(url: string) {
-            return url.includes('/api/timedtext') && url.includes('fmt=');
+            return url.includes('/api/timedtext');
           }
 
           // Intercept fetch
@@ -257,9 +257,10 @@ chrome.runtime.onMessage.addListener((message: Record<string, unknown>, sender: 
           };
 
           // Intercept XMLHttpRequest
-          XMLHttpRequest.prototype.open = function (method: string, url: string | URL, ...rest: [boolean?, string?, string?]) {
-            (this as XMLHttpRequest & { __url?: string }).__url = String(url);
-            return origXHROpen.call(this, method, url, ...rest);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (XMLHttpRequest.prototype as any).open = function (...openArgs: unknown[]) {
+            (this as XMLHttpRequest & { __url?: string }).__url = String(openArgs[1]);
+            return origXHROpen.apply(this, openArgs as any);
           };
           XMLHttpRequest.prototype.send = function (...args: [Document | XMLHttpRequestBodyInit | null | undefined]) {
             const xhrUrl = (this as XMLHttpRequest & { __url?: string }).__url || '';
@@ -307,7 +308,7 @@ chrome.runtime.onMessage.addListener((message: Record<string, unknown>, sender: 
           }
         });
       },
-      args: [lang || null],
+      args: [lang ?? undefined],
     })
       .then((results) => {
         const result = results?.[0]?.result as { text?: string; error?: string } | undefined;

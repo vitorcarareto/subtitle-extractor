@@ -1,4 +1,4 @@
-import { parseWebVTT, parseYouTubeJson3, deduplicateCues, cuesToSrt, cuesToVtt } from './lib.js';
+import { parseWebVTT, parseSubtitleText, extractLangFromUrl, sortTracksManualFirst, deduplicateCues, cuesToSrt, cuesToVtt } from './lib.js';
 import type { VideoMetadata, CaptionTrack, HotmartNextData, YouTubePlayerResponse } from './types.js';
 
 declare function showSaveFilePicker(options?: {
@@ -488,20 +488,14 @@ declare function showSaveFilePicker(options?: {
 
       if (isYT) {
         // YouTube: fetch first available track (prefer manual over auto)
-        const sorted = [...metadata.captionTracks!].sort((a, b) => {
-          if (a.kind === 'asr' && b.kind !== 'asr') return 1;
-          if (a.kind !== 'asr' && b.kind === 'asr') return -1;
-          return 0;
-        });
+        const sorted = sortTracksManualFirst(metadata.captionTracks!);
         const track = sorted[0];
-        const langMatch = track.baseUrl.match(/[?&]lang=([^&]*)/);
-        const lang = langMatch?.[1] || undefined;
+        const lang = extractLangFromUrl(track.baseUrl);
         const tabResp = await chrome.runtime.sendMessage({ type: 'getTabId' }) as { tabId?: number } | undefined;
         if (!tabResp?.tabId) throw new Error('No tab ID');
         const result = await chrome.runtime.sendMessage({ type: 'fetchYoutubeTrack', tabId: tabResp.tabId, lang });
         if (result.error) throw new Error(result.error);
-        const text = result.text;
-        cues = text.trimStart().startsWith('{') ? parseYouTubeJson3(text) : parseWebVTT(text);
+        cues = parseSubtitleText(result.text);
       } else {
         // Hotmart: need the captured pattern from background
         const tab = await getTabId();
@@ -557,9 +551,8 @@ declare function showSaveFilePicker(options?: {
   }
 
   async function getTabId(): Promise<number | undefined> {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: 'getTabId' }, (resp: { tabId?: number } | undefined) => resolve(resp?.tabId));
-    });
+    const resp = await chrome.runtime.sendMessage({ type: 'getTabId' }) as { tabId?: number } | undefined;
+    return resp?.tabId;
   }
 
   async function fetchSegmentsFromOverlay(pattern: { baseUrl: string }, concurrency: number): Promise<Array<{ seg: number; text?: string; error?: unknown }>> {

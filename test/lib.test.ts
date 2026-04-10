@@ -4,6 +4,9 @@ import {
   fixEncoding,
   parseWebVTT,
   parseYouTubeJson3,
+  parseSubtitleText,
+  extractLangFromUrl,
+  sortTracksManualFirst,
   parseTimestamp,
   deduplicateCues,
   cuesToTranscript,
@@ -931,5 +934,115 @@ describe('parseYouTubeJson3', () => {
     const cues = parseYouTubeJson3(json);
     expect(cues).toHaveLength(1);
     expect(cues[0].text).toBe('Valid');
+  });
+
+  it('returns empty array for malformed JSON', () => {
+    expect(parseYouTubeJson3('not json at all')).toEqual([]);
+  });
+
+  it('returns empty array for truncated JSON', () => {
+    expect(parseYouTubeJson3('{"events":[{"tStartMs":0')).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseSubtitleText (format auto-detection)
+// ---------------------------------------------------------------------------
+describe('parseSubtitleText', () => {
+  it('parses json3 when text starts with {', () => {
+    const json = JSON.stringify({
+      events: [{ tStartMs: 100, dDurationMs: 2000, segs: [{ utf8: 'Hello' }] }],
+    });
+    const cues = parseSubtitleText(json);
+    expect(cues).toHaveLength(1);
+    expect(cues[0].text).toBe('Hello');
+  });
+
+  it('parses json3 when text has leading whitespace before {', () => {
+    const json = '  \n' + JSON.stringify({
+      events: [{ tStartMs: 100, dDurationMs: 2000, segs: [{ utf8: 'Hello' }] }],
+    });
+    const cues = parseSubtitleText(json);
+    expect(cues).toHaveLength(1);
+    expect(cues[0].text).toBe('Hello');
+  });
+
+  it('parses VTT when text starts with WEBVTT', () => {
+    const vtt = `WEBVTT
+
+00:00:01.000 --> 00:00:02.000
+Hello`;
+    const cues = parseSubtitleText(vtt);
+    expect(cues).toHaveLength(1);
+    expect(cues[0].text).toBe('Hello');
+  });
+
+  it('parses VTT for non-JSON text', () => {
+    const vtt = `WEBVTT
+
+00:05.000 --> 00:10.000
+Short format`;
+    const cues = parseSubtitleText(vtt);
+    expect(cues).toHaveLength(1);
+    expect(cues[0].startMs).toBe(5000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractLangFromUrl
+// ---------------------------------------------------------------------------
+describe('extractLangFromUrl', () => {
+  it('extracts lang parameter from URL', () => {
+    expect(extractLangFromUrl('https://example.com/api/timedtext?lang=en&fmt=json3')).toBe('en');
+  });
+
+  it('extracts lang when not first param', () => {
+    expect(extractLangFromUrl('https://example.com/api?fmt=json3&lang=pt')).toBe('pt');
+  });
+
+  it('returns undefined when no lang param', () => {
+    expect(extractLangFromUrl('https://example.com/api?fmt=json3')).toBeUndefined();
+  });
+
+  it('returns undefined for empty string', () => {
+    expect(extractLangFromUrl('')).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sortTracksManualFirst
+// ---------------------------------------------------------------------------
+describe('sortTracksManualFirst', () => {
+  it('sorts manual tracks before ASR tracks', () => {
+    const tracks = [
+      { name: 'Auto', kind: 'asr', baseUrl: 'a' },
+      { name: 'Manual', kind: '', baseUrl: 'b' },
+    ];
+    const sorted = sortTracksManualFirst(tracks);
+    expect(sorted[0].name).toBe('Manual');
+    expect(sorted[1].name).toBe('Auto');
+  });
+
+  it('preserves order when all manual', () => {
+    const tracks = [
+      { name: 'English', kind: '', baseUrl: 'a' },
+      { name: 'Spanish', kind: '', baseUrl: 'b' },
+    ];
+    const sorted = sortTracksManualFirst(tracks);
+    expect(sorted[0].name).toBe('English');
+    expect(sorted[1].name).toBe('Spanish');
+  });
+
+  it('does not mutate the original array', () => {
+    const tracks = [
+      { name: 'Auto', kind: 'asr', baseUrl: 'a' },
+      { name: 'Manual', kind: '', baseUrl: 'b' },
+    ];
+    sortTracksManualFirst(tracks);
+    expect(tracks[0].name).toBe('Auto');
+  });
+
+  it('handles empty array', () => {
+    expect(sortTracksManualFirst([])).toEqual([]);
   });
 });

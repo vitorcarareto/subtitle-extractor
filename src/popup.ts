@@ -6,7 +6,7 @@ declare function showSaveFilePicker(options?: {
   }>;
 }): Promise<FileSystemFileHandle>;
 
-import { buildSegmentUrl, cuesToSrt, cuesToVtt, deduplicateCues, fetchAllSegmentsParallel, parseWebVTT, parseYouTubeJson3 } from './lib.js';
+import { buildSegmentUrl, cuesToSrt, cuesToVtt, deduplicateCues, extractLangFromUrl, fetchAllSegmentsParallel, parseWebVTT, parseSubtitleText, sortTracksManualFirst } from './lib.js';
 import type { Cue, CapturedPattern, ProviderInfo, VideoMetadata } from './types.js';
 
 const statusBox = document.getElementById('statusBox')!;
@@ -135,11 +135,7 @@ async function init(): Promise<void> {
         langRow.style.display = 'flex';
         langSelect.innerHTML = '';
         // Sort: manual captions first, then auto-generated
-        const sorted = [...metadata.captionTracks].sort((a, b) => {
-          if (a.kind === 'asr' && b.kind !== 'asr') return 1;
-          if (a.kind !== 'asr' && b.kind === 'asr') return -1;
-          return 0;
-        });
+        const sorted = sortTracksManualFirst(metadata.captionTracks);
         for (const track of sorted) {
           const opt = document.createElement('option');
           opt.value = track.baseUrl;
@@ -294,8 +290,7 @@ async function fetchYoutubeTrack(): Promise<Cue[]> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) throw new Error('No active tab');
 
-  const langMatch = trackUrl.match(/[?&]lang=([^&]*)/);
-  const lang = langMatch?.[1] || undefined;
+  const lang = extractLangFromUrl(trackUrl);
 
   setProgress(0, false);
   // Fetch via background → chrome.scripting.executeScript in page's MAIN world.
@@ -310,12 +305,7 @@ async function fetchYoutubeTrack(): Promise<Cue[]> {
 
   if (result.error) throw new Error(`Failed to fetch captions: ${result.error}`);
 
-  const text = result.text!;
-  // YouTube's player fetches json3/pb3 format; fall back to VTT parsing
-  if (text.trimStart().startsWith('{')) {
-    return parseYouTubeJson3(text);
-  }
-  return parseWebVTT(text);
+  return parseSubtitleText(result.text!);
 }
 
 async function fetchAllSegments(pattern: CapturedPattern): Promise<Cue[]> {
