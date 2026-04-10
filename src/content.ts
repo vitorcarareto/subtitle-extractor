@@ -1,5 +1,5 @@
-import { parseWebVTT, parseSubtitleText, extractLangFromUrl, sortTracksManualFirst, deduplicateCues, cuesToSrt, cuesToVtt } from './lib.js';
-import type { VideoMetadata, CaptionTrack, HotmartNextData, YouTubePlayerResponse } from './types.js';
+import { parseWebVTT, parseSubtitleText, extractLangFromUrl, sortTracksManualFirst, deduplicateCues, cuesToSrt, cuesToVtt, parseYouTubeCaptionTracks, parseYouTubeCaptionTracksFromHtml, parseHotmartMetadata, parseHotmartMetadataFromHtml } from './lib.js';
+import type { VideoMetadata, HotmartNextData, YouTubePlayerResponse } from './types.js';
 
 declare function showSaveFilePicker(options?: {
   suggestedName?: string;
@@ -33,46 +33,18 @@ declare function showSaveFilePicker(options?: {
       || document.title.replace(/ - YouTube$/, '').trim()
       || null;
 
-    // Extract caption tracks from ytInitialPlayerResponse
-    let captionTracks: CaptionTrack[] | null = null;
-    try {
-      // Try the global variable first (available on initial page load)
-      const playerResp = (window as unknown as { ytInitialPlayerResponse?: YouTubePlayerResponse }).ytInitialPlayerResponse;
-      const tracks = playerResp?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-      if (tracks && tracks.length > 0) {
-        captionTracks = tracks.map((t: { baseUrl: string; languageCode: string; name?: { simpleText?: string }; kind?: string }) => ({
-          baseUrl: t.baseUrl,
-          languageCode: t.languageCode,
-          name: t.name?.simpleText || t.languageCode,
-          kind: t.kind || '',
-        }));
-      }
-    } catch {
-      // ignore
-    }
+    // Try the global variable first (available on initial page load)
+    const playerResp = (window as unknown as { ytInitialPlayerResponse?: YouTubePlayerResponse }).ytInitialPlayerResponse;
+    let captionTracks = playerResp ? parseYouTubeCaptionTracks(playerResp) : null;
 
     // Fallback: parse from page HTML if global var is stale (SPA navigation)
     if (!captionTracks) {
-      try {
-        const scripts = document.querySelectorAll('script');
-        for (const script of scripts) {
-          const text = script.textContent;
-          if (text && text.includes('"captionTracks"')) {
-            const match = text.match(/"captionTracks":(\[.*?\])/);
-            if (match) {
-              const tracks = JSON.parse(match[1]);
-              captionTracks = tracks.map((t: { baseUrl: string; languageCode: string; name?: { simpleText?: string }; kind?: string }) => ({
-                baseUrl: t.baseUrl,
-                languageCode: t.languageCode,
-                name: t.name?.simpleText || t.languageCode,
-                kind: t.kind || '',
-              }));
-              break;
-            }
-          }
+      const scripts = document.querySelectorAll('script');
+      for (const script of scripts) {
+        if (script.textContent?.includes('"captionTracks"')) {
+          captionTracks = parseYouTubeCaptionTracksFromHtml(script.textContent);
+          if (captionTracks) break;
         }
-      } catch {
-        // ignore parse errors
       }
     }
 
@@ -84,36 +56,31 @@ declare function showSaveFilePicker(options?: {
     let mediaTitle: string | null = null;
 
     const nextDataEl = document.getElementById('__NEXT_DATA__');
-    if (nextDataEl) {
+    if (nextDataEl?.textContent) {
       try {
-        const data = JSON.parse(nextDataEl.textContent!) as HotmartNextData;
-        const props = data?.props?.pageProps;
-        if (props) {
-          mediaCode = props.mediaCode || props.applicationData?.mediaCode || null;
-          mediaTitle = props.mediaTitle || props.applicationData?.mediaTitle || null;
-        }
+        const data = JSON.parse(nextDataEl.textContent) as HotmartNextData;
+        ({ mediaCode, mediaTitle } = parseHotmartMetadata(data));
+
+        // Regex fallback within __NEXT_DATA__ text
         if (!mediaCode) {
-          const jsonStr = nextDataEl.textContent!;
-          const codeMatch = jsonStr.match(/"mediaCode"\s*:\s*"([^"]+)"/);
-          const titleMatch = jsonStr.match(/"mediaTitle"\s*:\s*"([^"]+)"/);
-          if (codeMatch) mediaCode = codeMatch[1];
-          if (titleMatch) mediaTitle = titleMatch[1];
+          ({ mediaCode, mediaTitle } = parseHotmartMetadataFromHtml(nextDataEl.textContent));
         }
-      } catch (e) {
+      } catch {
         // ignore parse errors
       }
     }
 
+    // Fallback: search other script tags
     if (!mediaCode) {
       const scripts = document.querySelectorAll('script');
       for (const script of scripts) {
-        const text = script.textContent;
-        if (text && text.includes('mediaCode')) {
-          const codeMatch = text.match(/"mediaCode"\s*:\s*"([^"]+)"/);
-          const titleMatch = text.match(/"mediaTitle"\s*:\s*"([^"]+)"/);
-          if (codeMatch) mediaCode = codeMatch[1];
-          if (titleMatch) mediaTitle = titleMatch[1];
-          if (mediaCode) break;
+        if (script.textContent?.includes('mediaCode')) {
+          const result = parseHotmartMetadataFromHtml(script.textContent);
+          if (result.mediaCode) {
+            mediaCode = result.mediaCode;
+            mediaTitle = result.mediaTitle;
+            break;
+          }
         }
       }
     }
