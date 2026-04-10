@@ -228,7 +228,10 @@ chrome.runtime.onMessage.addListener((message: Record<string, unknown>, sender: 
           const origXHRSend = XMLHttpRequest.prototype.send;
           const timeout = setTimeout(() => done({ error: 'Timeout waiting for subtitle response' }), 10000);
 
+          let settled = false;
           function done(result: { text?: string; error?: string }) {
+            if (settled) return;
+            settled = true;
             clearTimeout(timeout);
             window.fetch = origFetch;
             XMLHttpRequest.prototype.open = origXHROpen;

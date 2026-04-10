@@ -1,4 +1,4 @@
-import { parseWebVTT, deduplicateCues, cuesToSrt, cuesToVtt } from './lib.js';
+import { parseWebVTT, parseYouTubeJson3, deduplicateCues, cuesToSrt, cuesToVtt } from './lib.js';
 import type { VideoMetadata, CaptionTrack, HotmartNextData, YouTubePlayerResponse } from './types.js';
 
 declare function showSaveFilePicker(options?: {
@@ -493,10 +493,15 @@ declare function showSaveFilePicker(options?: {
           if (a.kind !== 'asr' && b.kind === 'asr') return -1;
           return 0;
         });
-        const trackUrl = sorted[0].baseUrl.replace(/&fmt=[^&]*/, '') + '&fmt=vtt';
-        const result = await chrome.runtime.sendMessage({ type: 'fetchYoutubeTrack', url: trackUrl });
+        const track = sorted[0];
+        const langMatch = track.baseUrl.match(/[?&]lang=([^&]*)/);
+        const lang = langMatch?.[1] || undefined;
+        const tabResp = await chrome.runtime.sendMessage({ type: 'getTabId' }) as { tabId?: number } | undefined;
+        if (!tabResp?.tabId) throw new Error('No tab ID');
+        const result = await chrome.runtime.sendMessage({ type: 'fetchYoutubeTrack', tabId: tabResp.tabId, lang });
         if (result.error) throw new Error(result.error);
-        cues = parseWebVTT(result.text);
+        const text = result.text;
+        cues = text.trimStart().startsWith('{') ? parseYouTubeJson3(text) : parseWebVTT(text);
       } else {
         // Hotmart: need the captured pattern from background
         const tab = await getTabId();

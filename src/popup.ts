@@ -303,7 +303,6 @@ async function fetchYoutubeTrack(): Promise<Cue[]> {
   // includes the required pot token) by triggering a caption track load.
   const result = await chrome.runtime.sendMessage({
     type: 'fetchYoutubeTrack',
-    url: trackUrl,
     lang,
     tabId: tab.id,
   }) as { text?: string; error?: string };
