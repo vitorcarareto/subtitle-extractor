@@ -1,5 +1,5 @@
 /**
- * Pure logic functions for Hotmart subtitle extraction.
+ * Pure logic functions for subtitle parsing and formatting.
  * Zero Chrome API dependencies — fully testable.
  */
 

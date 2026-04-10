@@ -1,8 +1,6 @@
 import { getProviderForUrl, getAllProviders } from './providers/registry.js';
 import type { CapturedPattern, ProviderInfo, ExtensionMessage } from './types.js';
 
-console.log('[BUILD bg] AC92A1ED-207C-4BF5-8EA4-446834D79611');
-
 const capturedPatterns: Record<number, CapturedPattern> = {};
 
 // Register webRequest listeners for all providers that have filters
@@ -213,129 +211,106 @@ chrome.runtime.onMessage.addListener((message: Record<string, unknown>, sender: 
   if (message.type === 'fetchYoutubeTrack') {
     const tabId = message.tabId as number | undefined;
     const lang = message.lang as string | undefined;
-    console.log('[DEBUG bg] fetchYoutubeTrack tabId:', tabId, 'lang:', lang);
     if (!tabId) {
       sendResponse({ error: 'No tabId provided' });
       return true;
     }
-    // Use YouTube's internal XMLHttpRequest interception to capture the
-    // subtitle response that the player fetches (with pot token included).
-    // We monkey-patch XMLHttpRequest.open, trigger the player to load the
-    // desired caption track, and capture the response.
+    // Intercept YouTube player's own subtitle fetch (which includes the
+    // required pot token) by monkey-patching fetch/XHR in the page's MAIN
+    // world, then triggering a caption track load via the player API.
     chrome.scripting.executeScript({
       target: { tabId, frameIds: [0] },
       world: 'MAIN',
       func: (trackLang: string | undefined) => {
         return new Promise<{ text?: string; error?: string }>((resolve) => {
-          const timeout = setTimeout(() => resolve({ error: 'Timeout waiting for subtitle response' }), 10000);
-
-          // Intercept fetch to capture timedtext responses
           const origFetch = window.fetch;
+          const origXHROpen = XMLHttpRequest.prototype.open;
+          const origXHRSend = XMLHttpRequest.prototype.send;
+          const timeout = setTimeout(() => done({ error: 'Timeout waiting for subtitle response' }), 10000);
+
+          function done(result: { text?: string; error?: string }) {
+            clearTimeout(timeout);
+            window.fetch = origFetch;
+            XMLHttpRequest.prototype.open = origXHROpen;
+            XMLHttpRequest.prototype.send = origXHRSend;
+            resolve(result);
+          }
+
+          function isTimedtextUrl(url: string) {
+            return url.includes('/api/timedtext') && url.includes('fmt=');
+          }
+
+          // Intercept fetch
           window.fetch = function (...args: Parameters<typeof fetch>) {
             const url = typeof args[0] === 'string' ? args[0] : (args[0] as Request).url;
-            if (url.includes('/api/timedtext') && url.includes('fmt=')) {
+            if (isTimedtextUrl(url)) {
               return origFetch.apply(this, args).then(async (response) => {
-                const clone = response.clone();
-                const text = await clone.text();
-                if (text.length > 0) {
-                  clearTimeout(timeout);
-                  window.fetch = origFetch;
-                  resolve({ text });
-                }
+                const text = await response.clone().text();
+                if (text.length > 0) done({ text });
                 return response;
               });
             }
             return origFetch.apply(this, args);
           };
 
-          // Also intercept XMLHttpRequest
-          const origXHROpen = XMLHttpRequest.prototype.open;
-          const origXHRSend = XMLHttpRequest.prototype.send;
+          // Intercept XMLHttpRequest
           XMLHttpRequest.prototype.open = function (method: string, url: string | URL, ...rest: [boolean?, string?, string?]) {
             (this as XMLHttpRequest & { __url?: string }).__url = String(url);
             return origXHROpen.call(this, method, url, ...rest);
           };
           XMLHttpRequest.prototype.send = function (...args: [Document | XMLHttpRequestBodyInit | null | undefined]) {
             const xhrUrl = (this as XMLHttpRequest & { __url?: string }).__url || '';
-            if (xhrUrl.includes('/api/timedtext') && xhrUrl.includes('fmt=')) {
+            if (isTimedtextUrl(xhrUrl)) {
               this.addEventListener('load', function () {
-                const text = this.responseText;
-                if (text && text.length > 0) {
-                  clearTimeout(timeout);
-                  XMLHttpRequest.prototype.open = origXHROpen;
-                  XMLHttpRequest.prototype.send = origXHRSend;
-                  window.fetch = origFetch;
-                  resolve({ text });
-                }
+                if (this.responseText?.length > 0) done({ text: this.responseText });
               });
             }
             return origXHRSend.apply(this, args);
           };
 
-          // Now trigger the player to load the caption track
+          // Trigger the player to load the desired caption track
           try {
             const player = document.querySelector('#movie_player') as HTMLElement & {
               setOption?: (module: string, option: string, value: unknown) => void;
-              getOption?: (module: string, option: string) => unknown;
               getPlayerResponse?: () => {
                 captions?: {
                   playerCaptionsTracklistRenderer?: {
-                    captionTracks?: Array<{ baseUrl: string; languageCode: string; vssId: string }>;
+                    captionTracks?: Array<{ languageCode: string; vssId: string }>;
                   };
                 };
               };
             };
 
-            if (!player?.setOption) {
-              clearTimeout(timeout);
-              XMLHttpRequest.prototype.open = origXHROpen;
-              XMLHttpRequest.prototype.send = origXHRSend;
-              window.fetch = origFetch;
-              resolve({ error: 'YouTube player not found' });
-              return;
-            }
+            if (!player?.setOption) return done({ error: 'YouTube player not found' });
 
-            // Find the track's vssId
-            const resp = player.getPlayerResponse?.();
-            const tracks = resp?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+            const tracks = player.getPlayerResponse?.()
+              ?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
             const target = trackLang
-              ? tracks.find((t: { languageCode: string }) => t.languageCode === trackLang)
+              ? tracks.find((t) => t.languageCode === trackLang)
               : tracks[0];
 
-            if (!target) {
-              clearTimeout(timeout);
-              XMLHttpRequest.prototype.open = origXHROpen;
-              XMLHttpRequest.prototype.send = origXHRSend;
-              window.fetch = origFetch;
-              resolve({ error: 'Caption track not found for lang: ' + trackLang });
-              return;
-            }
+            if (!target) return done({ error: 'Caption track not found for lang: ' + trackLang });
 
-            // Toggle captions off then on with the desired track to force a fetch
+            // Toggle captions off then on to force a fresh fetch
             player.setOption('captions', 'track', {});
             setTimeout(() => {
-              player!.setOption!('captions', 'track', { languageCode: target.languageCode, vssId: target.vssId });
+              player.setOption!('captions', 'track', {
+                languageCode: target.languageCode,
+                vssId: target.vssId,
+              });
             }, 100);
           } catch (err) {
-            clearTimeout(timeout);
-            XMLHttpRequest.prototype.open = origXHROpen;
-            XMLHttpRequest.prototype.send = origXHRSend;
-            window.fetch = origFetch;
-            resolve({ error: String(err) });
+            done({ error: String(err) });
           }
         });
       },
       args: [lang || null],
     })
       .then((results) => {
-        console.log('[DEBUG bg] executeScript results length:', JSON.stringify(results).length);
         const result = results?.[0]?.result as { text?: string; error?: string } | undefined;
         sendResponse(result || { error: 'No result from page script' });
       })
-      .catch((err) => {
-        console.log('[DEBUG bg] executeScript FAILED:', err);
-        sendResponse({ error: (err as Error).message });
-      });
+      .catch((err) => sendResponse({ error: (err as Error).message }));
     return true;
   }
 
