@@ -37,6 +37,11 @@ export default defineConfig({
   },
   test: {
     include: [resolve(__dirname, 'test/**/*.test.ts')],
+    coverage: {
+      reportsDirectory: resolve(__dirname, 'coverage'),
+      reporter: ['text', 'json'],
+      include: ['lib.ts'],
+    },
   },
   plugins: [copyStaticFiles()],
 });
