@@ -24,7 +24,7 @@ jobs:
 
       - run: pnpm typecheck
 
-      - run: pnpm test -- --coverage
+      - run: pnpm vitest run --coverage
 
       - uses: codecov/codecov-action@v5
         with:
