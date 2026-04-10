@@ -3,6 +3,7 @@ import {
   parseSubtitleUrl,
   fixEncoding,
   parseWebVTT,
+  parseYouTubeJson3,
   parseTimestamp,
   deduplicateCues,
   cuesToTranscript,
@@ -238,6 +239,43 @@ Late in the video`;
     expect(cues[0].startMs).toBe(5400500);
     expect(cues[0].endMs).toBe(5405000);
   });
+
+  it('parses MM:SS.mmm timestamps (no hours)', () => {
+    const vtt = `WEBVTT
+
+00:05.000 --> 00:10.000
+Short format`;
+    const cues = parseWebVTT(vtt);
+    expect(cues).toHaveLength(1);
+    expect(cues[0].startMs).toBe(5000);
+    expect(cues[0].endMs).toBe(10000);
+    expect(cues[0].text).toBe('Short format');
+  });
+
+  it('parses single-digit hour timestamps', () => {
+    const vtt = `WEBVTT
+
+0:00:05.000 --> 0:00:10.000
+Single digit hour`;
+    const cues = parseWebVTT(vtt);
+    expect(cues).toHaveLength(1);
+    expect(cues[0].startMs).toBe(5000);
+    expect(cues[0].endMs).toBe(10000);
+  });
+
+  it('parses mixed timestamp formats in same file', () => {
+    const vtt = `WEBVTT
+
+00:05.000 --> 00:10.000
+Short format
+
+00:00:15.000 --> 00:00:20.000
+Long format`;
+    const cues = parseWebVTT(vtt);
+    expect(cues).toHaveLength(2);
+    expect(cues[0].startMs).toBe(5000);
+    expect(cues[1].startMs).toBe(15000);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -264,6 +302,22 @@ describe('parseTimestamp', () => {
     expect(parseTimestamp('02:15:30.750')).toBe(
       2 * 3600000 + 15 * 60000 + 30 * 1000 + 750
     );
+  });
+
+  it('parses MM:SS.mmm format (no hours)', () => {
+    expect(parseTimestamp('00:05.000')).toBe(5000);
+  });
+
+  it('parses MM:SS.mmm with minutes', () => {
+    expect(parseTimestamp('02:30.500')).toBe(150500);
+  });
+
+  it('parses single-digit hour H:MM:SS.mmm', () => {
+    expect(parseTimestamp('1:00:00.000')).toBe(3600000);
+  });
+
+  it('parses multi-digit hours HHH:MM:SS.mmm', () => {
+    expect(parseTimestamp('100:00:00.000')).toBe(360000000);
   });
 });
 
@@ -762,5 +816,120 @@ describe('fetchAllSegmentsParallel', () => {
     });
     // seg 0 ok, seg 1 error → 1 consecutive → stop
     expect(results.filter(r => r.text)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// YouTube json3/pb3 parsing
+// ---------------------------------------------------------------------------
+describe('parseYouTubeJson3', () => {
+  it('parses events with segs into cues', () => {
+    const json = JSON.stringify({
+      wireMagic: 'pb3',
+      events: [
+        { tStartMs: 320, dDurationMs: 4959, segs: [{ utf8: 'Hello world' }] },
+        { tStartMs: 5280, dDurationMs: 3000, segs: [{ utf8: 'Second line' }] },
+      ],
+    });
+    const cues = parseYouTubeJson3(json);
+    expect(cues).toHaveLength(2);
+    expect(cues[0]).toEqual({ startMs: 320, endMs: 5279, text: 'Hello world' });
+    expect(cues[1]).toEqual({ startMs: 5280, endMs: 8280, text: 'Second line' });
+  });
+
+  it('skips events without segs (window/style setup)', () => {
+    const json = JSON.stringify({
+      wireMagic: 'pb3',
+      events: [
+        { tStartMs: 0, dDurationMs: 3537839, id: 1, wpWinPosId: 1, wsWinStyleId: 1 },
+        { tStartMs: 320, dDurationMs: 4959, segs: [{ utf8: 'Hello' }] },
+      ],
+    });
+    const cues = parseYouTubeJson3(json);
+    expect(cues).toHaveLength(1);
+    expect(cues[0].text).toBe('Hello');
+  });
+
+  it('concatenates multiple segs in a single event', () => {
+    const json = JSON.stringify({
+      events: [
+        { tStartMs: 100, dDurationMs: 2000, segs: [
+          { utf8: 'Hello ' },
+          { utf8: 'world' },
+        ]},
+      ],
+    });
+    const cues = parseYouTubeJson3(json);
+    expect(cues).toHaveLength(1);
+    expect(cues[0].text).toBe('Hello world');
+  });
+
+  it('replaces newlines with spaces in seg text', () => {
+    const json = JSON.stringify({
+      events: [
+        { tStartMs: 100, dDurationMs: 2000, segs: [{ utf8: 'Line one\nLine two' }] },
+      ],
+    });
+    const cues = parseYouTubeJson3(json);
+    expect(cues[0].text).toBe('Line one Line two');
+  });
+
+  it('skips events with empty text after joining segs', () => {
+    const json = JSON.stringify({
+      events: [
+        { tStartMs: 100, dDurationMs: 2000, segs: [{ utf8: '\n' }] },
+        { tStartMs: 200, dDurationMs: 2000, segs: [{ utf8: '' }] },
+        { tStartMs: 300, dDurationMs: 2000, segs: [{ utf8: 'Real text' }] },
+      ],
+    });
+    const cues = parseYouTubeJson3(json);
+    expect(cues).toHaveLength(1);
+    expect(cues[0].text).toBe('Real text');
+  });
+
+  it('skips events missing tStartMs or dDurationMs', () => {
+    const json = JSON.stringify({
+      events: [
+        { dDurationMs: 2000, segs: [{ utf8: 'No start' }] },
+        { tStartMs: 100, segs: [{ utf8: 'No duration' }] },
+        { tStartMs: 200, dDurationMs: 2000, segs: [{ utf8: 'Valid' }] },
+      ],
+    });
+    const cues = parseYouTubeJson3(json);
+    expect(cues).toHaveLength(1);
+    expect(cues[0].text).toBe('Valid');
+  });
+
+  it('handles tStartMs of 0', () => {
+    const json = JSON.stringify({
+      events: [
+        { tStartMs: 0, dDurationMs: 1000, segs: [{ utf8: 'Start' }] },
+      ],
+    });
+    const cues = parseYouTubeJson3(json);
+    expect(cues).toHaveLength(1);
+    expect(cues[0].startMs).toBe(0);
+  });
+
+  it('handles empty events array', () => {
+    const json = JSON.stringify({ wireMagic: 'pb3', events: [] });
+    expect(parseYouTubeJson3(json)).toEqual([]);
+  });
+
+  it('handles missing events key', () => {
+    const json = JSON.stringify({ wireMagic: 'pb3' });
+    expect(parseYouTubeJson3(json)).toEqual([]);
+  });
+
+  it('handles segs with missing utf8 field', () => {
+    const json = JSON.stringify({
+      events: [
+        { tStartMs: 100, dDurationMs: 2000, segs: [{}] },
+        { tStartMs: 200, dDurationMs: 2000, segs: [{ utf8: 'Valid' }] },
+      ],
+    });
+    const cues = parseYouTubeJson3(json);
+    expect(cues).toHaveLength(1);
+    expect(cues[0].text).toBe('Valid');
   });
 });
