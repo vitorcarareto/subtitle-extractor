@@ -6,8 +6,10 @@ declare function showSaveFilePicker(options?: {
   }>;
 }): Promise<FileSystemFileHandle>;
 
-import { buildSegmentUrl, cuesToSrt, cuesToVtt, deduplicateCues, fetchAllSegmentsParallel, parseWebVTT } from './lib.js';
+import { buildSegmentUrl, cuesToSrt, cuesToVtt, deduplicateCues, fetchAllSegmentsParallel, parseWebVTT, parseYouTubeJson3 } from './lib.js';
 import type { Cue, CapturedPattern, ProviderInfo, VideoMetadata } from './types.js';
+
+console.log('[BUILD popup] AC92A1ED-207C-4BF5-8EA4-446834D79611');
 
 const statusBox = document.getElementById('statusBox')!;
 const statusIcon = document.getElementById('statusIcon')!;
@@ -294,13 +296,39 @@ async function fetchYoutubeTrack(): Promise<Cue[]> {
   // Append &fmt=vtt to get WebVTT format
   const vttUrl = trackUrl.replace(/&fmt=[^&]*/, '') + '&fmt=vtt';
 
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) throw new Error('No active tab');
+
+  // Extract lang from the selected track URL
+  const langMatch = trackUrl.match(/[?&]lang=([^&]*)/);
+  const lang = langMatch?.[1] || undefined;
+  console.log('[DEBUG] fetchYoutubeTrack lang:', lang);
+
   setProgress(0, false);
-  const result = await chrome.runtime.sendMessage({ type: 'fetchYoutubeTrack', url: vttUrl }) as { text?: string; error?: string };
+  // Fetch via background → chrome.scripting.executeScript in page's MAIN world.
+  // The page script gets a fresh track URL from YouTube's player (which includes pot).
+  const result = await chrome.runtime.sendMessage({
+    type: 'fetchYoutubeTrack',
+    url: trackUrl,
+    lang,
+    tabId: tab.id,
+  }) as { text?: string; error?: string };
   setProgress(1, true);
+
+  console.log('[DEBUG] fetchYoutubeTrack raw result:', JSON.stringify(result).substring(0, 500));
 
   if (result.error) throw new Error(`Failed to fetch captions: ${result.error}`);
 
-  return parseWebVTT(result.text!);
+  const text = result.text!;
+  // YouTube's player fetches json3/pb3 format; fall back to VTT parsing
+  let cues: Cue[];
+  if (text.trimStart().startsWith('{')) {
+    cues = parseYouTubeJson3(text);
+  } else {
+    cues = parseWebVTT(text);
+  }
+  console.log('[DEBUG] fetchYoutubeTrack parsed cues:', cues.length);
+  return cues;
 }
 
 async function fetchAllSegments(pattern: CapturedPattern): Promise<Cue[]> {

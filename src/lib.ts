@@ -54,7 +54,7 @@ export function parseWebVTT(vttText: string): Cue[] {
     const line = lines[i].trim();
 
     const tsMatch = line.match(
-      /^(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})/
+      /^(\d{1,}:\d{2}:\d{2}\.\d{3}|\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{1,}:\d{2}:\d{2}\.\d{3}|\d{2}:\d{2}\.\d{3})/
     );
     if (tsMatch) {
       const startMs = parseTimestamp(tsMatch[1]);
@@ -77,12 +77,48 @@ export function parseWebVTT(vttText: string): Cue[] {
 }
 
 /**
- * Parse a WebVTT timestamp (HH:MM:SS.mmm) into milliseconds.
+ * Parse YouTube's json3/pb3 subtitle format into cues.
+ * Events with `segs` arrays contain subtitle text; others are window/style setup.
+ */
+export function parseYouTubeJson3(jsonText: string): Cue[] {
+  const data = JSON.parse(jsonText);
+  const events: Array<{ tStartMs?: number; dDurationMs?: number; segs?: Array<{ utf8?: string }> }> = data.events || [];
+  const cues: Cue[] = [];
+
+  for (const event of events) {
+    if (!event.segs || event.tStartMs == null || event.dDurationMs == null) continue;
+    const text = event.segs
+      .map((seg) => seg.utf8 || '')
+      .join('')
+      .replace(/\n/g, ' ')
+      .trim();
+    if (!text) continue;
+    cues.push({
+      startMs: event.tStartMs,
+      endMs: event.tStartMs + event.dDurationMs,
+      text,
+    });
+  }
+  return cues;
+}
+
+const MS_PER_SECOND = 1000;
+const MS_PER_MINUTE = 60000;
+const MS_PER_HOUR = 3600000;
+
+/**
+ * Parse a WebVTT timestamp (HH:MM:SS.mmm or MM:SS.mmm) into milliseconds.
  */
 export function parseTimestamp(ts: string): number {
-  const [h, m, rest] = ts.split(':');
-  const [s, ms] = rest.split('.');
-  return parseInt(h) * 3600000 + parseInt(m) * 60000 + parseInt(s) * 1000 + parseInt(ms);
+  const parts = ts.split(':');
+  if (parts.length === 2) {
+    // MM:SS.mmm
+    const [s, ms] = parts[1].split('.');
+    return parseInt(parts[0]) * MS_PER_MINUTE + parseInt(s) * MS_PER_SECOND + parseInt(ms);
+  }
+  // HH:MM:SS.mmm
+  const [s, ms] = parts[2].split('.');
+  return parseInt(parts[0]) * MS_PER_HOUR + parseInt(parts[1]) * MS_PER_MINUTE + parseInt(s) * MS_PER_SECOND + parseInt(ms);
 }
 
 /**
