@@ -1,5 +1,8 @@
 # Subtitle Extractor
 
+[![CI](https://github.com/vitorcarareto/subtitle-extractor/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/vitorcarareto/subtitle-extractor/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/vitorcarareto/subtitle-extractor/graph/badge.svg)](https://codecov.io/gh/vitorcarareto/subtitle-extractor)
+
 A Chrome extension that extracts subtitles from video platforms and saves them as text, SRT, or WebVTT files.
 
 Particularly useful for extracting video transcripts to use as context for LLMs and AI agents — turn any lecture, tutorial, or course into structured text you can feed into your AI workflow.
