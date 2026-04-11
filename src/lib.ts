@@ -3,7 +3,7 @@
  * Zero Chrome API dependencies — fully testable.
  */
 
-import type { Cue, ParsedSubtitleUrl, FetchResult, SegmentResult, FetchAllSegmentsOptions } from './types.js';
+import type { Cue, ParsedSubtitleUrl, FetchResult, SegmentResult, FetchAllSegmentsOptions, CaptionTrack, YouTubePlayerResponse, HotmartNextData } from './types.js';
 
 /**
  * Parse a subtitle segment URL and extract the pattern components.
@@ -318,4 +318,54 @@ export async function fetchAllSegmentsParallel({
 
   // Return only the contiguous resolved results (no undefined gaps)
   return results.filter((r): r is SegmentResult => r !== undefined);
+}
+
+/**
+ * Parse caption tracks from a YouTube player response object.
+ * Returns null if no tracks are found.
+ */
+export function parseYouTubeCaptionTracks(response: YouTubePlayerResponse): CaptionTrack[] | null {
+  const tracks = response?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+  if (!tracks || tracks.length === 0) return null;
+  return tracks.map((t) => ({
+    baseUrl: t.baseUrl,
+    languageCode: t.languageCode,
+    name: t.name?.simpleText || t.languageCode,
+    kind: t.kind || '',
+  }));
+}
+
+/**
+ * Extract caption tracks from a YouTube page's script text using regex.
+ * Falls back to regex when the player response isn't available via interception.
+ */
+export function parseYouTubeCaptionTracksFromHtml(scriptText: string): CaptionTrack[] | null {
+  const match = scriptText.match(/"captionTracks":(\[.*?\])/);
+  if (!match) return null;
+  try {
+    const raw = JSON.parse(match[1]);
+    return parseYouTubeCaptionTracks({ captions: { playerCaptionsTracklistRenderer: { captionTracks: raw } } });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse Hotmart metadata (mediaCode, mediaTitle) from a __NEXT_DATA__ object.
+ */
+export function parseHotmartMetadata(data: HotmartNextData): { mediaCode: string | null; mediaTitle: string | null } {
+  const props = data?.props?.pageProps;
+  const mediaCode = props?.mediaCode ?? props?.applicationData?.mediaCode ?? null;
+  const mediaTitle = props?.mediaTitle ?? props?.applicationData?.mediaTitle ?? null;
+  return { mediaCode, mediaTitle };
+}
+
+/**
+ * Extract Hotmart mediaCode and mediaTitle from script text using regex.
+ * Used as a fallback when structured data isn't available.
+ */
+export function parseHotmartMetadataFromHtml(scriptText: string): { mediaCode: string | null; mediaTitle: string | null } {
+  const codeMatch = scriptText.match(/"mediaCode"\s*:\s*"([^"]+)"/);
+  const titleMatch = scriptText.match(/"mediaTitle"\s*:\s*"([^"]+)"/);
+  return { mediaCode: codeMatch?.[1] || null, mediaTitle: titleMatch?.[1] || null };
 }
